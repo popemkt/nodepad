@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag, Swords, HelpCircle, AlertTriangle, Wand2 } from "lucide-react"
+import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag, Swords, HelpCircle, AlertTriangle, Wand2, Scissors } from "lucide-react"
 import { motion } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -55,6 +55,8 @@ interface TileCardProps {
   onSteelman?: (id: string) => void
   /** Generate Socratic questions about this note (added as ghost notes). */
   onSocratic?: (id: string) => void
+  /** Rewrite the note's text as a short title-style fragment (undoable). */
+  onShortenTitle?: (id: string) => void
 }
 
 // Custom Markdown components for styling
@@ -113,6 +115,7 @@ export const TileCard = memo(function TileCard({
   onChangeType,
   onSteelman,
   onSocratic,
+  onShortenTitle,
 }: TileCardProps) {
   // In tiling view, collapse is disabled — BSP layout can't redistribute freed space
   const effectiveCollapsed = hideCollapse ? false : isCollapsed
@@ -457,10 +460,11 @@ export const TileCard = memo(function TileCard({
               <Tag className="h-2.5 w-2.5" />
             </button>
           )}
-          {/* Generate dropdown — collapses Socratic, Steelman, and Re-enrich into
-              one menu so the action row stays clean. Re-enrich is hidden for
-              thesis tiles (which have their own dedicated refresh button above). */}
-          {!effectiveCollapsed && (onSocratic || onSteelman || block.contentType !== "thesis") && (
+          {/* Generate dropdown — collapses Socratic, Steelman, Shorten Title,
+              and Re-enrich into one menu so the action row stays clean. Re-enrich
+              is hidden for thesis tiles (which have their own dedicated refresh
+              button above). */}
+          {!effectiveCollapsed && (onSocratic || onSteelman || onShortenTitle || block.contentType !== "thesis") && (
             <button
               ref={generateButtonRef}
               onClick={(e) => {
@@ -536,6 +540,21 @@ export const TileCard = memo(function TileCard({
                 <div className="flex flex-col">
                   <span className="font-mono text-[10px] font-bold uppercase tracking-wide">Steelman</span>
                   <span className="font-mono text-[9px] text-muted-foreground/60">Strongest counter-argument</span>
+                </div>
+              </button>
+            )}
+            {onShortenTitle && (
+              <button
+                onClick={() => {
+                  onShortenTitle(block.id)
+                  setIsGenerateOpen(false)
+                }}
+                className="flex items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-all hover:bg-secondary/60"
+              >
+                <Scissors className="h-3 w-3 flex-shrink-0 text-sky-400" />
+                <div className="flex flex-col">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide">Shorten Title</span>
+                  <span className="font-mono text-[9px] text-muted-foreground/60">Rewrite as a sharp fragment (undoable)</span>
                 </div>
               </button>
             )}

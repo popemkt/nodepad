@@ -48,6 +48,7 @@ interface TilingAreaProps {
   onChangeType: (id: string, newType: import("@/lib/content-types").ContentType) => void
   onSteelman?: (id: string) => void
   onSocratic?: (id: string) => void
+  onShortenTitle?: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
   onToggleSubTask: (id: string, subTaskId: string) => void
@@ -66,6 +67,7 @@ export function TilingArea({
   onChangeType,
   onSteelman,
   onSocratic,
+  onShortenTitle,
   onToggleCollapse,
   onTogglePin,
   onToggleSubTask,
@@ -201,6 +203,7 @@ export function TilingArea({
               onChangeType={onChangeType}
               onSteelman={onSteelman}
               onSocratic={onSocratic}
+              onShortenTitle={onShortenTitle}
               onToggleCollapse={onToggleCollapse}
               onTogglePin={onTogglePin}
               onToggleSubTask={onToggleSubTask}
@@ -250,6 +253,7 @@ export function TilingArea({
               onChangeType={onChangeType}
               onSteelman={onSteelman}
               onSocratic={onSocratic}
+              onShortenTitle={onShortenTitle}
               onToggleCollapse={onToggleCollapse}
               onTogglePin={onTogglePin}
               onToggleSubTask={onToggleSubTask}

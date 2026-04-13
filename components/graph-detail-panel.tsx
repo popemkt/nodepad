@@ -4,7 +4,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
 import type { TextBlock } from "@/components/tile-card"
-import { Link as LinkIcon, Pin, RefreshCw, Tag, X, Swords, HelpCircle } from "lucide-react"
+import { Link as LinkIcon, Pin, RefreshCw, Tag, X, Swords, HelpCircle, Scissors } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -62,6 +62,7 @@ interface GraphDetailPanelProps {
   /** Forwarded from page → graph-area. Wired into the dedicated buttons below. */
   onSteelman?: (id: string) => void
   onSocratic?: (id: string) => void
+  onShortenTitle?: (id: string) => void
   onTogglePin: (id: string) => void
   onEdit: (id: string, text: string) => void
   onEditAnnotation: (id: string, annotation: string) => void
@@ -76,6 +77,7 @@ export function GraphDetailPanel({
   onChangeType,
   onSteelman,
   onSocratic,
+  onShortenTitle,
   onTogglePin,
   onEdit,
   onEditAnnotation,
@@ -240,6 +242,15 @@ export function GraphDetailPanel({
               title="Steelman: generate the strongest counter-argument"
             >
               <Swords className="h-3 w-3" />
+            </button>
+          )}
+          {onShortenTitle && (
+            <button
+              onClick={() => onShortenTitle(block.id)}
+              className="p-1 rounded-sm opacity-40 hover:opacity-90 transition-opacity"
+              title="Shorten title (undoable)"
+            >
+              <Scissors className="h-3 w-3" />
             </button>
           )}
           <button

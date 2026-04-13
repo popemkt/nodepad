@@ -30,6 +30,7 @@ interface GraphAreaProps {
   onChangeType:     (id: string, newType: import("@/lib/content-types").ContentType) => void
   onSteelman?:      (id: string) => void
   onSocratic?:      (id: string) => void
+  onShortenTitle?:  (id: string) => void
   onTogglePin:      (id: string) => void
   onEdit:           (id: string, text: string) => void
   onEditAnnotation: (id: string, annotation: string) => void
@@ -182,6 +183,7 @@ export function GraphArea({
   onChangeType,
   onSteelman,
   onSocratic,
+  onShortenTitle,
   onTogglePin,
   onEdit,
   onEditAnnotation,
@@ -777,6 +779,7 @@ export function GraphArea({
             onChangeType={onChangeType}
             onSteelman={onSteelman}
             onSocratic={onSocratic}
+            onShortenTitle={onShortenTitle}
             onTogglePin={onTogglePin}
             onEdit={onEdit}
             onEditAnnotation={onEditAnnotation}

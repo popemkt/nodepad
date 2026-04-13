@@ -17,6 +17,7 @@ interface KanbanAreaProps {
   onChangeType: (id: string, newType: import("@/lib/content-types").ContentType) => void
   onSteelman?: (id: string) => void
   onSocratic?: (id: string) => void
+  onShortenTitle?: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
   onToggleSubTask: (id: string, subTaskId: string) => void
@@ -33,6 +34,7 @@ export function KanbanArea({
   onChangeType,
   onSteelman,
   onSocratic,
+  onShortenTitle,
   onToggleCollapse,
   onTogglePin,
   onToggleSubTask,
@@ -161,6 +163,7 @@ export function KanbanArea({
                         onChangeType={onChangeType}
                         onSteelman={onSteelman}
                         onSocratic={onSocratic}
+                        onShortenTitle={onShortenTitle}
                         onToggleCollapse={onToggleCollapse}
                         onToggleSubTask={onToggleSubTask}
                         onDeleteSubTask={onDeleteSubTask}
