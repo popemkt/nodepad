@@ -30,6 +30,8 @@ import {
 import {
   DEFAULT_TONE_PRESETS,
   DEFAULT_TONE_ID,
+  getCustomToneInstructionError,
+  MAX_CUSTOM_TONE_CHARS,
   makeCustomToneId,
   type TonePreset,
 } from "@/lib/tone-presets"
@@ -150,11 +152,14 @@ export function ProjectSidebar({
   const activeTonePreset =
     allTonePresets.find(t => t.id === (draft.activeToneId ?? DEFAULT_TONE_ID))
     ?? DEFAULT_TONE_PRESETS[0]
+  const customToneInstructionError =
+    newToneInstruction.trim().length === 0 ? null : getCustomToneInstructionError(newToneInstruction)
 
   const handleAddCustomTone = () => {
     const name = newToneName.trim()
     const instruction = newToneInstruction.trim()
-    if (!name || !instruction) return
+    const instructionError = getCustomToneInstructionError(instruction)
+    if (!name || !instruction || instructionError) return
     const newPreset: TonePreset = {
       id: makeCustomToneId(name),
       name,
@@ -607,14 +612,20 @@ export function ProjectSidebar({
                           <textarea
                             value={newToneInstruction}
                             onChange={e => setNewToneInstruction(e.target.value)}
-                            placeholder="Instruction appended to every AI prompt — e.g. &quot;Tone: write like a careful lawyer. Cite precedent, qualify claims, identify the strongest counter-position.&quot;"
+                            placeholder="Style brief quoted into every AI prompt — e.g. &quot;Voice: careful lawyer. Qualify claims, surface assumptions, stress the strongest counter-position.&quot;"
                             rows={4}
                             className="w-full resize-y bg-black/30 border border-white/10 rounded-sm px-2 py-1.5 font-mono text-[10px] text-foreground outline-none focus:border-primary/40 placeholder:text-muted-foreground/40 custom-scrollbar"
                           />
+                          <p className={`font-mono text-[9px] leading-relaxed ${
+                            customToneInstructionError ? "text-destructive/80" : "text-muted-foreground/50"
+                          }`}>
+                            {customToneInstructionError
+                              ?? `Style-only. Custom tones can change voice and framing, but not JSON, markdown, list, or other output rules. Max ${MAX_CUSTOM_TONE_CHARS} characters.`}
+                          </p>
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={handleAddCustomTone}
-                              disabled={!newToneName.trim() || !newToneInstruction.trim()}
+                              disabled={!newToneName.trim() || !newToneInstruction.trim() || !!customToneInstructionError}
                               className="flex items-center gap-1 px-2 py-1 rounded-sm bg-primary/20 hover:bg-primary/30 disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[9px] font-bold uppercase tracking-wider text-primary transition-colors"
                             >
                               <Check className="h-2.5 w-2.5" />
