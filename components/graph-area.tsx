@@ -3,7 +3,7 @@
 import * as React from "react"
 import * as d3 from "d3"
 import { CONTENT_TYPE_CONFIG } from "@/lib/content-types"
-import type { TextBlock } from "@/components/tile-card"
+import type { HighlightTarget, TextBlock } from "@/components/tile-card"
 import { GraphDetailPanel } from "./graph-detail-panel"
 import { useModKey } from "@/lib/utils"
 
@@ -34,8 +34,8 @@ interface GraphAreaProps {
   onTogglePin:      (id: string) => void
   onEdit:           (id: string, text: string) => void
   onEditAnnotation: (id: string, annotation: string) => void
-  highlightedBlockId?: string | null
-  onHighlight?: (id: string | null) => void
+  highlightedBlockIds?: string[]
+  onHighlight?: (target: HighlightTarget) => void
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ export function GraphArea({
   onTogglePin,
   onEdit,
   onEditAnnotation,
-  highlightedBlockId,
+  highlightedBlockIds,
   onHighlight,
 }: GraphAreaProps) {
   const mod = useModKey()
@@ -363,20 +363,34 @@ export function GraphArea({
   // ── Hover / index-highlight / selection: connected set ───────────────────
   // selectedId is included so selecting a node keeps its connections lit even
   // after the cursor moves away; hover and index-highlight take priority.
-  const focalId = hoveredId ?? selectedId ?? highlightedBlockId ?? null
+  const externalHighlightIds = highlightedBlockIds ?? []
+  const highlightedBlockIdSet = React.useMemo(
+    () => new Set(externalHighlightIds),
+    [externalHighlightIds],
+  )
+  const focalIds =
+    hoveredId ? [hoveredId] :
+    selectedId ? [selectedId] :
+    externalHighlightIds
+  const focalIdSet = React.useMemo(
+    () => new Set(focalIds),
+    [focalIds],
+  )
 
   const connectedToFocal = React.useMemo(() => {
-    if (!focalId) return null
-    const ids = new Set<string>([focalId])
-    if (nodesRef.current.find(n => n.id === focalId)?.isSynthesis) {
-      for (const n of nodesRef.current) ids.add(n.id)
-    } else {
-      const b = blocks.find(x => x.id === focalId)
-      if (b?.influencedBy) for (const id of b.influencedBy) ids.add(id)
+    if (focalIds.length === 0) return null
+    const ids = new Set<string>(focalIds)
+    for (const focalId of focalIds) {
+      if (nodesRef.current.find(n => n.id === focalId)?.isSynthesis) {
+        for (const n of nodesRef.current) ids.add(n.id)
+        continue
+      }
+      const block = blocks.find(x => x.id === focalId)
+      if (block?.influencedBy) for (const id of block.influencedBy) ids.add(id)
       for (const x of blocks) if (x.influencedBy?.includes(focalId)) ids.add(x.id)
     }
     return ids
-  }, [focalId, blocks])
+  }, [blocks, focalIds])
 
   const selectedBlock = React.useMemo(
     () => blocks.find(b => b.id === selectedId) ?? null,
@@ -492,9 +506,9 @@ export function GraphArea({
                 const [sx, sy, tx2, ty2] = [s.x, s.y, t.x, t.y]
 
                 const isSynth = (link as SimLink).isSynthesisLink
-                const dimmed = focalId != null &&
-                  s.id !== focalId && t.id !== focalId
-                const highlighted = focalId != null && !dimmed && !isSynth
+                const dimmed = focalIdSet.size > 0 &&
+                  !focalIdSet.has(s.id) && !focalIdSet.has(t.id)
+                const highlighted = focalIdSet.size > 0 && !dimmed && !isSynth
 
                 const d = isSynth
                   ? `M ${sx} ${sy} L ${tx2} ${ty2}`
@@ -527,8 +541,8 @@ export function GraphArea({
 
                 const isSelected  = node.id === selectedId
                 const isHovered   = node.id === hoveredId
-                const isDimmed = focalId != null && !isHovered &&
-                  node.id !== focalId &&
+                const isDimmed = focalIdSet.size > 0 && !isHovered &&
+                  !focalIdSet.has(node.id) &&
                   (!connectedToFocal || !connectedToFocal.has(node.id))
                 const isEnriching = node.block?.isEnriching
                 const isHub       = node.degree >= 3 && !node.isSynthesis
@@ -575,7 +589,7 @@ export function GraphArea({
                     onMouseLeave={() => { setHoveredId(null); setTooltip(null) }}
                   >
                     {/* Index-highlight ring */}
-                    {node.id === highlightedBlockId && !isHovered && !isSelected && (
+                    {highlightedBlockIdSet.has(node.id) && !isHovered && !isSelected && (
                       <circle
                         r={r + 10}
                         fill="none"
