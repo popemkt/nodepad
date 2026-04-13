@@ -628,7 +628,7 @@ export const TileCard = memo(function TileCard({
             </div>
 
             {/* Confidence bar */}
-            {block.confidence !== undefined && block.confidence !== null && !isEditing && (
+            {block.confidence !== undefined && block.confidence !== null && block.contentType === "claim" && !isEditing && (
               <div className={`px-3 pb-2 flex-shrink-0 transition-opacity duration-300 ${isHovered ? "opacity-100" : "opacity-0"}`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-mono text-[9px] text-muted-foreground">Confidence</span>

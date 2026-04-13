@@ -265,8 +265,8 @@ export function GraphDetailPanel({
           )}
         </div>
 
-        {/* Confidence bar */}
-        {block.confidence != null && (
+        {/* Confidence bar — claim type only */}
+        {block.confidence != null && block.contentType === "claim" && (
           <div className="px-4 pb-3 space-y-1">
             <div className="flex items-center justify-between">
               <span className="font-mono text-[8px] uppercase tracking-widest text-muted-foreground/50">Confidence</span>

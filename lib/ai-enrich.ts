@@ -104,6 +104,11 @@ Use the most specific type. Avoid 'general' unless nothing else fits. 'thesis' i
 ## Types
 claim · question · task · idea · entity · quote · reference · definition · opinion · reflection · narrative · comparison · general · thesis
 
+## Confidence Scoring
+The "confidence" field is **claim-specific**: it expresses how likely the assertion is to be true given general knowledge.
+- For contentType === "claim": return an integer 0–100 (0 = clearly false, 50 = uncertain, 100 = well-established fact).
+- For every other contentType: return null. Confidence is meaningless for questions, tasks, ideas, quotes, references, etc. — do NOT invent a number.
+
 ## Relational Logic
 The Global Page Context lists existing notes wrapped in <note> tags by index [0], [1], [2]…
 Set influencedByIndices to the indices of notes that are meaningfully connected to this one — shared topic, supporting evidence, contradiction, conceptual dependency, or direct reference. Be generous: if there is a plausible thematic link, include it. Return an empty array only if there is genuinely no connection.
@@ -132,6 +137,7 @@ const JSON_SCHEMA = {
       annotation:         { type: "string" },
       confidence: {
         anyOf: [{ type: "number" }, { type: "null" }],
+        description: "Integer 0–100 expressing how likely the claim is to be true. ONLY populate when contentType is 'claim'; otherwise return null.",
       },
       influencedByIndices: {
         type: "array",
@@ -412,7 +418,11 @@ You have live web access. For this note type, include 1–2 real source citation
       `AI returned unparseable JSON.${finishReason ? ` Finish reason: ${finishReason}.` : ""} Raw: ${content.substring(0, 200)}`
     )
   }
-  if (result.confidence != null) {
+  // Confidence is claim-specific. Defensively null it out for any other type
+  // in case the model ignored the system prompt and returned a number anyway.
+  if (result.contentType !== "claim") {
+    result.confidence = null
+  } else if (result.confidence != null) {
     result.confidence = Math.min(100, Math.max(0, Math.round(result.confidence)))
   }
 
