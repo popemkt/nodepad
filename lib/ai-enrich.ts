@@ -113,6 +113,9 @@ The "confidence" field is **claim-specific**: it expresses how likely the assert
 The Global Page Context lists existing notes wrapped in <note> tags by index [0], [1], [2]…
 Set influencedByIndices to the indices of notes that are meaningfully connected to this one — shared topic, supporting evidence, contradiction, conceptual dependency, or direct reference. Be generous: if there is a plausible thematic link, include it. Return an empty array only if there is genuinely no connection.
 
+## Contradiction Detection
+Set contradictsIndices to the indices of existing notes whose claims this new note **directly contradicts** — meaning if the new note is true, the other note cannot also be true (and vice versa). Be strict: only flag genuine logical or factual conflicts, not mere differences in emphasis, scope, or framing. If two notes both make claims about the same subject but one is a refinement or extension of the other, that is NOT a contradiction. Most enrichments will return an empty array. Quality over quantity — a single real contradiction is more valuable than five borderline ones.
+
 ## URL References
 When a <url_fetch_result> block is present, use its content (title, description, excerpt) as the primary source for the annotation — not the raw URL. If status is "error" or "404", note the inaccessibility clearly in the annotation and keep it brief.
 
@@ -144,6 +147,11 @@ const JSON_SCHEMA = {
         items: { type: "number" },
         description: "Indices of context notes that influenced this enrichment",
       },
+      contradictsIndices: {
+        type: "array",
+        items: { type: "number" },
+        description: "Indices of context notes whose claims this new note DIRECTLY contradicts. Be strict — only flag genuine logical conflicts, not mere differences in scope or framing. Empty array is the common case.",
+      },
       isUnrelated: {
         type: "boolean",
         description: "True if the note is completely unrelated",
@@ -153,7 +161,7 @@ const JSON_SCHEMA = {
         description: "Index of an existing note to merge into, or null if this note stands alone",
       },
     },
-    required: ["contentType","category","annotation","confidence","influencedByIndices","isUnrelated","mergeWithIndex"],
+    required: ["contentType","category","annotation","confidence","influencedByIndices","contradictsIndices","isUnrelated","mergeWithIndex"],
     additionalProperties: false,
   },
 }
@@ -191,6 +199,7 @@ export interface EnrichResult {
   annotation: string
   confidence: number | null
   influencedByIndices: number[]
+  contradictsIndices: number[]
   isUnrelated: boolean
   mergeWithIndex: number | null
   sources?: { url: string; title: string; siteName: string }[]
@@ -226,17 +235,21 @@ function coerceLooseEnrichResult(content: string): EnrichResult | null {
   const contentTypeMatch = content.match(/"contentType"\s*:\s*"([^"]+)"/)
   const categoryMatch    = content.match(/"category"\s*:\s*"([^"]+)"/)
   const annotationMatch  = content.match(
-    /"annotation"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"(?:confidence|influencedByIndices|isUnrelated|mergeWithIndex)"|\s*$)/
+    /"annotation"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"(?:confidence|influencedByIndices|contradictsIndices|isUnrelated|mergeWithIndex)"|\s*$)/
   )
   if (!contentTypeMatch || !categoryMatch || !annotationMatch) return null
 
   const confidenceRaw    = content.match(/"confidence"\s*:\s*(null|-?\d+(?:\.\d+)?)/)?.[1]
   const influencedRaw    = content.match(/"influencedByIndices"\s*:\s*\[([^\]]*)\]/)?.[1]
+  const contradictsRaw   = content.match(/"contradictsIndices"\s*:\s*\[([^\]]*)\]/)?.[1]
   const isUnrelatedRaw   = content.match(/"isUnrelated"\s*:\s*(true|false)/)?.[1]
   const mergeRaw         = content.match(/"mergeWithIndex"\s*:\s*(null|-?\d+)/)?.[1]
 
   const influencedByIndices = influencedRaw
     ? influencedRaw.split(",").map(p => Number(p.trim())).filter(Number.isFinite)
+    : []
+  const contradictsIndices = contradictsRaw
+    ? contradictsRaw.split(",").map(p => Number(p.trim())).filter(Number.isFinite)
     : []
 
   return {
@@ -245,6 +258,7 @@ function coerceLooseEnrichResult(content: string): EnrichResult | null {
     annotation:          decodeJsonishString(annotationMatch[1]),
     confidence:          confidenceRaw == null || confidenceRaw === "null" ? null : Number(confidenceRaw),
     influencedByIndices,
+    contradictsIndices,
     isUnrelated:         isUnrelatedRaw === "true",
     mergeWithIndex:      mergeRaw == null || mergeRaw === "null" ? null : Number(mergeRaw),
   }
@@ -252,10 +266,17 @@ function coerceLooseEnrichResult(content: string): EnrichResult | null {
 
 function parseEnrichResult(content: string): EnrichResult | null {
   const candidate = extractJsonCandidate(content) ?? content.trim()
+  // Inline normalization wrapper so all return paths default contradictsIndices
+  // to an empty array (older provider responses may omit the new field).
+  const normalize = (r: EnrichResult | null): EnrichResult | null => {
+    if (!r) return null
+    if (!Array.isArray(r.contradictsIndices)) r.contradictsIndices = []
+    return r
+  }
   try {
-    return JSON.parse(candidate) as EnrichResult
+    return normalize(JSON.parse(candidate) as EnrichResult)
   } catch {
-    return coerceLooseEnrichResult(candidate)
+    return normalize(coerceLooseEnrichResult(candidate))
   }
 }
 

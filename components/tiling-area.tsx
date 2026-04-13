@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useMemo, useRef, useEffect, useState, useCallback } from "react"
-import { TileCard, type TextBlock } from "@/components/tile-card"
+import { TileCard, type HighlightTarget, type TextBlock } from "@/components/tile-card"
 import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
 import { getRelatedIds, useModKey } from "@/lib/utils"
 import { TilingMinimap } from "./tiling-minimap"
@@ -46,12 +46,14 @@ interface TilingAreaProps {
   onEditAnnotation: (id: string, newAnnotation: string) => void
   onReEnrich: (id: string, newCategory?: string) => void
   onChangeType: (id: string, newType: import("@/lib/content-types").ContentType) => void
+  onSteelman?: (id: string) => void
+  onSocratic?: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
   onToggleSubTask: (id: string, subTaskId: string) => void
   onDeleteSubTask: (id: string, subTaskId: string) => void
-  highlightedBlockId?: string | null
-  onHighlight: (id: string | null) => void
+  highlightedBlockIds?: string[]
+  onHighlight: (target: HighlightTarget) => void
 }
 
 export function TilingArea({
@@ -62,11 +64,13 @@ export function TilingArea({
   onEditAnnotation,
   onReEnrich,
   onChangeType,
+  onSteelman,
+  onSocratic,
   onToggleCollapse,
   onTogglePin,
   onToggleSubTask,
   onDeleteSubTask,
-  highlightedBlockId,
+  highlightedBlockIds,
   onHighlight,
 }: TilingAreaProps) {
   const mod = useModKey()
@@ -76,6 +80,10 @@ export function TilingArea({
   const [lockedConnectionId, setLockedConnectionId] = useState<string | null>(null)
 
   const activeConnectionId = lockedConnectionId ?? hoveredConnectionId
+  const highlightedBlockIdSet = useMemo(
+    () => new Set(highlightedBlockIds ?? []),
+    [highlightedBlockIds],
+  )
 
   const relatedIds = useMemo<Set<string>>(
     () => activeConnectionId ? getRelatedIds(activeConnectionId, blocks) : new Set(),
@@ -195,11 +203,13 @@ export function TilingArea({
               onEditAnnotation={onEditAnnotation}
               onReEnrich={onReEnrich}
               onChangeType={onChangeType}
+              onSteelman={onSteelman}
+              onSocratic={onSocratic}
               onToggleCollapse={onToggleCollapse}
               onTogglePin={onTogglePin}
               onToggleSubTask={onToggleSubTask}
               onDeleteSubTask={onDeleteSubTask}
-              isHighlighted={highlightedBlockId === block.id}
+              isHighlighted={highlightedBlockIdSet.has(block.id)}
               onHighlight={onHighlight}
               onConnectionHover={handleConnectionHover}
               onConnectionLock={handleConnectionLock}
@@ -242,11 +252,13 @@ export function TilingArea({
               onEditAnnotation={onEditAnnotation}
               onReEnrich={onReEnrich}
               onChangeType={onChangeType}
+              onSteelman={onSteelman}
+              onSocratic={onSocratic}
               onToggleCollapse={onToggleCollapse}
               onTogglePin={onTogglePin}
               onToggleSubTask={onToggleSubTask}
               onDeleteSubTask={onDeleteSubTask}
-              isHighlighted={highlightedBlockId === taskBlock.id}
+              isHighlighted={highlightedBlockIdSet.has(taskBlock.id)}
               onHighlight={onHighlight}
               onConnectionHover={handleConnectionHover}
               onConnectionLock={handleConnectionLock}

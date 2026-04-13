@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag } from "lucide-react"
+import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag, Swords, HelpCircle, AlertTriangle, Wand2 } from "lucide-react"
 import { motion } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -24,7 +24,15 @@ export interface TextBlock {
   isUnrelated?: boolean
   isPinned?: boolean
   subTasks?: { id: string; text: string; isDone: boolean; timestamp: number }[]
+  /** Block id this note is a steelman/counter of. Set when generated via the
+   *  "Counter" button on another tile. */
+  counterTo?: string
+  /** Block ids whose claims this note contradicts. Populated by enrichment when
+   *  the model detects a tension with existing notes. */
+  contradicts?: string[]
 }
+
+export type HighlightTarget = string | string[] | null
 
 interface TileCardProps {
   block: TextBlock
@@ -39,12 +47,16 @@ interface TileCardProps {
   onToggleSubTask?: (blockId: string, subTaskId: string) => void
   onDeleteSubTask?: (blockId: string, subTaskId: string) => void
   isHighlighted?: boolean
-  onHighlight?: (id: string | null) => void
+  onHighlight?: (target: HighlightTarget) => void
   onConnectionHover?: (blockId: string | null) => void
   onConnectionLock?: (blockId: string) => void
   isConnectionLocked?: boolean
   allBlocks?: TextBlock[]
   onChangeType?: (id: string, newType: ContentType) => void
+  /** Generate a steelman / strongest counter-argument for this note. */
+  onSteelman?: (id: string) => void
+  /** Generate Socratic questions about this note (added as ghost notes). */
+  onSocratic?: (id: string) => void
 }
 
 // Custom Markdown components for styling
@@ -101,6 +113,8 @@ export const TileCard = memo(function TileCard({
   allBlocks,
   hideCollapse = false,
   onChangeType,
+  onSteelman,
+  onSocratic,
 }: TileCardProps) {
   // In tiling view, collapse is disabled — BSP layout can't redistribute freed space
   const effectiveCollapsed = hideCollapse ? false : isCollapsed
@@ -116,6 +130,11 @@ export const TileCard = memo(function TileCard({
   const [pickerRect, setPickerRect] = useState<DOMRect | null>(null)
   const typeChangeButtonRef = useRef<HTMLButtonElement>(null)
   const typePickerDropdownRef = useRef<HTMLDivElement>(null)
+  // Generate dropdown — collapses Socratic / Steelman / Re-enrich into one menu
+  const [isGenerateOpen, setIsGenerateOpen] = useState(false)
+  const [generateRect, setGenerateRect] = useState<DOMRect | null>(null)
+  const generateButtonRef = useRef<HTMLButtonElement>(null)
+  const generateDropdownRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const annotationRef = useRef<HTMLTextAreaElement>(null)
   const footerRef = useRef<HTMLDivElement>(null)
@@ -182,6 +201,27 @@ export const TileCard = memo(function TileCard({
       document.removeEventListener("mousedown", handleMouseDown)
     }
   }, [isTypePickerOpen])
+
+  // Same outside-click / Escape behavior for the Generate dropdown.
+  useEffect(() => {
+    if (!isGenerateOpen) return
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsGenerateOpen(false) }
+    const handleMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (
+        !generateButtonRef.current?.contains(t) &&
+        !generateDropdownRef.current?.contains(t)
+      ) {
+        setIsGenerateOpen(false)
+      }
+    }
+    window.addEventListener("keydown", handleKey)
+    document.addEventListener("mousedown", handleMouseDown)
+    return () => {
+      window.removeEventListener("keydown", handleKey)
+      document.removeEventListener("mousedown", handleMouseDown)
+    }
+  }, [isGenerateOpen])
 
   const handleSave = useCallback(() => {
     if (editText.trim() && editText !== block.text) {
@@ -419,20 +459,25 @@ export const TileCard = memo(function TileCard({
               <Tag className="h-2.5 w-2.5" />
             </button>
           )}
-          {/* Re-enrich button — runs the annotation pass again. Pushes an undo
-              snapshot in the parent so Cmd+Z restores the previous annotation. */}
-          {!effectiveCollapsed && block.contentType !== "thesis" && (
+          {/* Generate dropdown — collapses Socratic, Steelman, and Re-enrich into
+              one menu so the action row stays clean. Re-enrich is hidden for
+              thesis tiles (which have their own dedicated refresh button above). */}
+          {!effectiveCollapsed && (onSocratic || onSteelman || block.contentType !== "thesis") && (
             <button
+              ref={generateButtonRef}
               onClick={(e) => {
                 e.stopPropagation()
-                onReEnrich(block.id)
+                if (generateButtonRef.current) {
+                  setGenerateRect(generateButtonRef.current.getBoundingClientRect())
+                }
+                setIsGenerateOpen(v => !v)
               }}
               disabled={block.isEnriching}
-              className="flex h-4 w-4 items-center justify-center rounded-sm transition-all opacity-40 hover:opacity-100 hover:bg-black/10 disabled:cursor-not-allowed"
-              title="Re-enrich (undoable)"
-              aria-label="Re-enrich note"
+              className={`flex h-4 w-4 items-center justify-center rounded-sm transition-all disabled:cursor-not-allowed ${isGenerateOpen ? "bg-black/20 opacity-100" : "opacity-40 hover:opacity-100 hover:bg-black/10"}`}
+              title="Generate (Socratic, Steelman, Re-enrich)"
+              aria-label="Generate menu"
             >
-              <RefreshCw className={`h-2.5 w-2.5 ${block.isEnriching ? "animate-spin opacity-50" : ""}`} />
+              <Wand2 className={`h-2.5 w-2.5 ${block.isEnriching ? "animate-pulse opacity-50" : ""}`} />
             </button>
           )}
           <button
@@ -447,6 +492,75 @@ export const TileCard = memo(function TileCard({
           </button>
         </div>
       </div>
+
+      {/* Generate dropdown — rendered via portal so it escapes tile overflow:hidden */}
+      {isGenerateOpen && generateRect && isMounted && createPortal(
+        <div
+          ref={generateDropdownRef}
+          className="rounded-md border border-border bg-card shadow-xl"
+          style={{
+            position: "fixed",
+            top: generateRect.bottom + 4,
+            right: window.innerWidth - generateRect.right,
+            minWidth: 220,
+            zIndex: 9999,
+          }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <p className="px-2.5 pt-2 pb-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/50">
+            Generate
+          </p>
+          <div className="flex flex-col p-1 pt-0">
+            {onSocratic && (
+              <button
+                onClick={() => {
+                  onSocratic(block.id)
+                  setIsGenerateOpen(false)
+                }}
+                className="flex items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-all hover:bg-secondary/60"
+              >
+                <HelpCircle className="h-3 w-3 flex-shrink-0 text-primary/70" />
+                <div className="flex flex-col">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide">Socratic Questions</span>
+                  <span className="font-mono text-[9px] text-muted-foreground/60">3 prompts → Synthesis panel</span>
+                </div>
+              </button>
+            )}
+            {onSteelman && (
+              <button
+                onClick={() => {
+                  onSteelman(block.id)
+                  setIsGenerateOpen(false)
+                }}
+                className="flex items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-all hover:bg-secondary/60"
+              >
+                <Swords className="h-3 w-3 flex-shrink-0 text-amber-400" />
+                <div className="flex flex-col">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide">Steelman</span>
+                  <span className="font-mono text-[9px] text-muted-foreground/60">Strongest counter-argument</span>
+                </div>
+              </button>
+            )}
+            {block.contentType !== "thesis" && (
+              <button
+                onClick={() => {
+                  onReEnrich(block.id)
+                  setIsGenerateOpen(false)
+                }}
+                disabled={block.isEnriching}
+                className="flex items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-all hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3 w-3 flex-shrink-0 text-muted-foreground ${block.isEnriching ? "animate-spin" : ""}`} />
+                <div className="flex flex-col">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide">Re-enrich</span>
+                  <span className="font-mono text-[9px] text-muted-foreground/60">Regenerate annotation (undoable)</span>
+                </div>
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Type picker — rendered via portal so it escapes tile overflow:hidden */}
       {isTypePickerOpen && pickerRect && onChangeType && isMounted && createPortal(
@@ -673,6 +787,82 @@ export const TileCard = memo(function TileCard({
                       <span className="opacity-70">#</span>
                       <span className="truncate max-w-[120px]">{block.category || "no-topic"}</span>
                     </span>
+
+                    {/* Counter-to badge — this note is a steelman of another */}
+                    {block.counterTo && (() => {
+                      const parent = allBlocks?.find(b => b.id === block.counterTo)
+                      const parentPreview = parent ? parent.text.substring(0, 40) + (parent.text.length > 40 ? "…" : "") : "deleted note"
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (block.counterTo) onHighlight?.(block.counterTo)
+                          }}
+                          onMouseEnter={() => block.counterTo && onHighlight?.(block.counterTo)}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-all"
+                          title={`Counter to: ${parentPreview}`}
+                        >
+                          <Swords className="h-2.5 w-2.5 text-amber-400" />
+                          <span className="font-mono text-[9px] font-bold text-amber-400 uppercase tracking-tighter">
+                            Counter
+                          </span>
+                        </button>
+                      )
+                    })()}
+
+                    {/* Contradicts badge — this note flagged a tension with N existing notes */}
+                    {block.contradicts && block.contradicts.length > 0 && (() => {
+                      const refs = block.contradicts
+                        .map(id => allBlocks?.find(b => b.id === id))
+                        .filter(Boolean) as TextBlock[]
+                      const refIds = refs.map(r => r.id)
+                      const tooltip = refs.length > 0
+                        ? "Contradicts:\n" + refs.map(r => "• " + r.text.substring(0, 50)).join("\n")
+                        : "Contradicts other notes"
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (refs[0]) onHighlight?.(refs[0].id)
+                          }}
+                          onMouseEnter={() => refIds.length > 0 && onHighlight?.(refIds)}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
+                          title={tooltip}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5 text-red-400" />
+                          <span className="font-mono text-[9px] font-bold text-red-400 uppercase tracking-tighter">
+                            Contradicts {block.contradicts.length}
+                          </span>
+                        </button>
+                      )
+                    })()}
+
+                    {/* Contradicted-by badge — computed back-reference: any other block whose contradicts[] includes us */}
+                    {(() => {
+                      const contradictors = (allBlocks ?? []).filter(b => b.contradicts?.includes(block.id))
+                      const contradictorIds = contradictors.map(r => r.id)
+                      if (contradictors.length === 0) return null
+                      const tooltip = "Contradicted by:\n" + contradictors.map(r => "• " + r.text.substring(0, 50)).join("\n")
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onHighlight?.(contradictors[0].id)
+                          }}
+                          onMouseEnter={() => contradictorIds.length > 0 && onHighlight?.(contradictorIds)}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
+                          title={tooltip}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5 text-red-400 rotate-180" />
+                          <span className="font-mono text-[9px] font-bold text-red-400 uppercase tracking-tighter">
+                            Disputed by {contradictors.length}
+                          </span>
+                        </button>
+                      )
+                    })()}
 
                     {block.influencedBy && block.influencedBy.length > 0 && (
                       <div className="group/influences relative">
