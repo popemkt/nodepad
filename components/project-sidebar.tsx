@@ -71,6 +71,7 @@ export function ProjectSidebar({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showKey, setShowKey] = useState(false)
+  const [showExaKey, setShowExaKey] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [providerOpen, setProviderOpen] = useState(false)
   // local draft for settings (only save on "Save")
@@ -110,11 +111,12 @@ export function ProjectSidebar({
   const persistSettings = () => {
     // Trim key to strip accidental whitespace/newlines from paste
     const trimmedKey = draft.apiKey.trim()
+    const trimmedExaKey = (draft.exaApiKey ?? "").trim()
     const providerKeys: Partial<Record<AIProvider, string>> = {
       ...(draft.providerKeys ?? {}),
       [draft.provider]: trimmedKey,
     }
-    onUpdateAISettings({ ...draft, apiKey: trimmedKey, providerKeys })
+    onUpdateAISettings({ ...draft, apiKey: trimmedKey, exaApiKey: trimmedExaKey, providerKeys })
   }
 
   const handleSaveSettings = () => {
@@ -447,35 +449,80 @@ export function ProjectSidebar({
                   )}
                 </div>
 
-                {/* Web Grounding (OpenRouter + OpenAI) */}
-                {(draft.provider === "openrouter" || draft.provider === "openai") && selectedModel && (
-                  <div className="flex items-start justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-2.5">
-                    <div className="flex items-start gap-2">
-                      <Globe className="h-3.5 w-3.5 mt-0.5 text-primary/60 shrink-0" />
-                      <div>
-                        <div className="font-mono text-[11px] font-bold text-foreground">Web Grounding</div>
-                        <div className="font-mono text-[9px] text-muted-foreground mt-0.5 leading-relaxed">
-                          {selectedModel.supportsGrounding
-                            ? draft.provider === "openai"
-                              ? `Uses ${selectedModel.groundingModelId ?? "search-preview"} for live web access`
-                              : "Adds :online for live search"
-                            : "Not available for this model"}
+                {/* Web Grounding — works for any provider when an Exa key is set,
+                    falls back to OpenRouter/OpenAI native search variants otherwise. */}
+                {(() => {
+                  const exaConfigured = (draft.exaApiKey ?? "").trim().length > 0
+                  const nativeAvailable =
+                    (draft.provider === "openrouter" || draft.provider === "openai") &&
+                    (selectedModel?.supportsGrounding ?? false)
+                  const groundingAvailable = exaConfigured || nativeAvailable
+                  const effectivelyOn = draft.webGrounding && groundingAvailable
+                  const description = exaConfigured
+                    ? "Live web search via Exa — works on any provider"
+                    : nativeAvailable
+                      ? draft.provider === "openai"
+                        ? `Uses ${selectedModel?.groundingModelId ?? "search-preview"} for live web access`
+                        : "Adds :online for live search"
+                      : "Add an Exa key below to enable grounding for this provider"
+
+                  if (!selectedModel) return null
+
+                  return (
+                    <div className="flex items-start justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-2.5">
+                      <div className="flex items-start gap-2">
+                        <Globe className="h-3.5 w-3.5 mt-0.5 text-primary/60 shrink-0" />
+                        <div>
+                          <div className="font-mono text-[11px] font-bold text-foreground">Web Grounding</div>
+                          <div className="font-mono text-[9px] text-muted-foreground mt-0.5 leading-relaxed">
+                            {description}
+                          </div>
                         </div>
                       </div>
+                      <button
+                        onClick={() => groundingAvailable && setDraft(d => ({ ...d, webGrounding: !d.webGrounding }))}
+                        disabled={!groundingAvailable}
+                        className={`relative shrink-0 h-5 w-9 rounded-full transition-all duration-200 ${
+                          effectivelyOn ? "bg-primary" : "bg-white/10"
+                        } disabled:opacity-30 disabled:cursor-not-allowed`}
+                      >
+                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${
+                          effectivelyOn ? "left-5" : "left-0.5"
+                        }`} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => selectedModel.supportsGrounding && setDraft(d => ({ ...d, webGrounding: !d.webGrounding }))}
-                      disabled={!selectedModel.supportsGrounding}
-                      className={`relative shrink-0 h-5 w-9 rounded-full transition-all duration-200 ${
-                        draft.webGrounding && selectedModel.supportsGrounding ? "bg-primary" : "bg-white/10"
-                      } disabled:opacity-30 disabled:cursor-not-allowed`}
-                    >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${
-                        draft.webGrounding && selectedModel.supportsGrounding ? "left-5" : "left-0.5"
-                      }`} />
+                  )
+                })()}
+
+                {/* Exa Search Key — optional, unlocks grounding for any provider */}
+                <div className="flex flex-col gap-2">
+                  <label className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                    Exa Key · Web Search (optional)
+                  </label>
+                  <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 focus-within:border-primary/50 transition-colors">
+                    <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={draft.exaApiKey ?? ""}
+                      onChange={e => setDraft(d => ({ ...d, exaApiKey: e.target.value }))}
+                      placeholder="Your Exa API key"
+                      className="flex-1 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/40"
+                      style={showExaKey ? undefined : { WebkitTextSecurity: "disc" } as never}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button onClick={() => setShowExaKey(v => !v)} className="text-muted-foreground hover:text-foreground transition-colors">
+                      {showExaKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                     </button>
                   </div>
-                )}
+                  <p className="font-mono text-[9px] text-muted-foreground leading-relaxed">
+                    Enables web grounding for every provider via Exa search. Stored locally.{" "}
+                    <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener noreferrer"
+                      className="text-primary underline hover:brightness-125 transition-all">
+                      Get a key →
+                    </a>
+                  </p>
+                </div>
 
                 {/* API Status */}
                 <div className={`flex items-center gap-2 rounded-md px-2.5 py-2 font-mono text-[9px] ${

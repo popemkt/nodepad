@@ -2,6 +2,7 @@
 
 import { detectContentType } from "@/lib/detect-content-type"
 import { loadAIConfig, getBaseUrl, getProviderHeaders, getModelsForProvider } from "@/lib/ai-settings"
+import { exaSearch, formatExaResultsForPrompt, type WebSearchResult } from "@/lib/web-search"
 import type { ContentType } from "@/lib/content-types"
 
 // ── Provider error parser ─────────────────────────────────────────────────────
@@ -265,17 +266,31 @@ export async function enrichBlockClient(
 
   const detectedType = detectContentType(text)
   const effectiveType = forcedType || detectedType
-  const shouldGround = config.supportsGrounding && TRUTH_DEPENDENT_TYPES.has(effectiveType)
+  const wantsGround = config.groundingMode !== "off" && TRUTH_DEPENDENT_TYPES.has(effectiveType)
 
   let model = config.modelId
   let webSearchOptions: Record<string, unknown> | undefined
-  if (shouldGround) {
-    if (config.provider === "openrouter") {
-      if (!model.endsWith(":online")) model = `${model}:online`
-    } else if (config.provider === "openai") {
-      const modelDef = getModelsForProvider("openai").find(m => m.id === config.modelId)
-      if (modelDef?.groundingModelId) model = modelDef.groundingModelId
-      webSearchOptions = {}
+  let exaContext = ""
+  let exaResults: WebSearchResult[] = []
+
+  if (wantsGround) {
+    if (config.groundingMode === "exa") {
+      // Search Exa with a trimmed version of the note so the query stays focused.
+      // Failure here should NOT block enrichment — fall through ungrounded.
+      try {
+        exaResults = await exaSearch(text.trim().slice(0, 500), config.exaApiKey, 5)
+        exaContext = formatExaResultsForPrompt(exaResults)
+      } catch (err) {
+        console.warn("[ai-enrich] Exa search failed, continuing without grounding:", err)
+      }
+    } else if (config.groundingMode === "native") {
+      if (config.provider === "openrouter") {
+        if (!model.endsWith(":online")) model = `${model}:online`
+      } else if (config.provider === "openai") {
+        const modelDef = getModelsForProvider("openai").find(m => m.id === config.modelId)
+        if (modelDef?.groundingModelId) model = modelDef.groundingModelId
+        webSearchOptions = {}
+      }
     }
   }
 
@@ -284,7 +299,10 @@ export async function enrichBlockClient(
   // fall back to json_object mode (guaranteed valid JSON, no schema enforcement)
   const useStrictSchema = supportsJsonSchema && !webSearchOptions
 
-  const groundingNote = shouldGround
+  // Native grounding tells the model "you have live web access" generically.
+  // Exa grounding injects actual results via exaContext, which already includes
+  // its own citation instructions, so we skip the generic note in that case.
+  const groundingNote = wantsGround && config.groundingMode === "native"
     ? `\n\n## Source Citations (grounded search active)
 You have live web access. For this note type, include 1–2 real source citations by name, publication, and year. Do NOT generate URLs — reference by title and author only (e.g. "Per *Science*, 2023, Doe et al."). Only cite sources you have actually retrieved.`
     : ""
@@ -297,7 +315,7 @@ You have live web access. For this note type, include 1–2 real source citation
     ? `\n\n## Output Format — CRITICAL\nYou MUST respond with a single JSON object (no markdown, no explanation). Schema:\n${JSON.stringify(JSON_SCHEMA.schema, null, 2)}`
     : ""
 
-  const systemPrompt = SYSTEM_PROMPT + groundingNote + schemaHint
+  const systemPrompt = SYSTEM_PROMPT + groundingNote + exaContext + schemaHint
 
   const categoryContext = category
     ? `\n\nThe user has assigned this note the category "${category}".`
@@ -418,7 +436,17 @@ You have live web access. For this note type, include 1–2 real source citation
       return true
     })
 
-  if (sources.length > 0) result.sources = sources
+  if (sources.length > 0) {
+    result.sources = sources
+  } else if (exaResults.length > 0) {
+    // Exa grounding path: results are not on `message.annotations`; build the
+    // tile-card source list from the search response we already have.
+    result.sources = exaResults.map(r => {
+      let siteName = ""
+      try { siteName = new URL(r.url).hostname.replace(/^www\./, "") } catch { /* ignore */ }
+      return { url: r.url, title: r.title || siteName, siteName }
+    })
+  }
 
   return result
 }
