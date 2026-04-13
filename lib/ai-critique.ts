@@ -1,14 +1,17 @@
 "use client"
 
-import { loadAIConfig, getBaseUrl, getProviderHeaders } from "@/lib/ai-settings"
-import { parseProviderError } from "@/lib/ai-enrich"
+import { generateObject, NoObjectGeneratedError } from "ai"
+import { z } from "zod"
+import { loadAIConfig } from "@/lib/ai-settings"
+import { prepareAICall } from "@/lib/ai-client"
 import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { ContentType } from "@/lib/content-types"
 
 // Critique tools — features that challenge an existing note rather than
-// enriching it. Both functions are one-shot, plain-text or structured-JSON
-// completions that reuse whatever provider/grounding the user already
-// configured. Failures throw — callers decide whether to surface a toast.
+// enriching it. Every helper is a one-shot generateObject call returning a
+// strict Zod-validated envelope. Structured output is critical here because
+// thinking models (Kimi K2.5 Turbo, DeepSeek R1, etc.) leak chain-of-thought
+// into plain text responses but suppress it under structured output.
 
 const STEELMAN_SYSTEM_PROMPT = `You are a critical thinking partner embedded in a notetaking tool.
 
@@ -19,13 +22,7 @@ Rules:
 - No URLs, no hyperlinks. Reference sources by name only if at all.
 - Don't hedge ("on the other hand…", "it could be argued…"). State the counter as if you believe it.
 - Don't restate the original note. Get straight to the rebuttal.
-- Use markdown sparingly: **bold** for the key tension, *italic* for titles.
-
-## Output Format — CRITICAL
-Respond with a single JSON object: {"counter": "<the counter-argument prose>"}.
-- No reasoning, no chain-of-thought, no preamble — only the JSON object.
-- The "counter" field contains the final 2–4 sentence rebuttal, nothing else.
-- No markdown code fences around the JSON.`
+- Use markdown sparingly: **bold** for the key tension, *italic* for titles.`
 
 const SHORTEN_SYSTEM_PROMPT = `You are an editor embedded in a notetaking tool. Your job: rewrite the user's note as a sharp, title-style fragment.
 
@@ -35,13 +32,7 @@ Rules:
 - Preserve the core noun phrase or claim — strip qualifiers, hedges, and connectives.
 - Keep proper nouns and numbers exactly as written.
 - Do not editorialise, summarise, or add information that wasn't there.
-- Match the language of the original note.
-
-## Output Format — CRITICAL
-Respond with a single JSON object: {"title": "<the shortened version>"}.
-- No reasoning, no chain-of-thought, no preamble — only the JSON object.
-- The "title" field contains the shortened text, nothing else.
-- No markdown code fences around the JSON.`
+- Match the language of the original note.`
 
 const SOCRATIC_SYSTEM_PROMPT = `You are a Socratic prompter embedded in a notetaking tool.
 
@@ -52,116 +43,97 @@ Rules:
 - Each question max 15 words. Concrete, not vague ("What evidence?", not "How do we know?").
 - Avoid yes/no questions when possible — favour ones that force exploration.
 - No questions that just restate the note.
-- No questions about the user themselves ("Why do you think X?") — focus on the subject matter.
+- No questions about the user themselves ("Why do you think X?") — focus on the subject matter.`
 
-Output format: a single JSON object {"questions": ["…", "…", "…"]}. No prose, no markdown fences.`
+const SteelmanSchema = z.object({
+  counter: z.string().describe("The 2–4 sentence counter-argument prose"),
+})
 
-async function callOneShot(systemPrompt: string, userText: string, jsonMode: boolean): Promise<string> {
+const ShortenSchema = z.object({
+  title: z.string().describe("The shortened title-style fragment, max 8 words, no trailing period"),
+})
+
+const SocraticSchema = z.object({
+  questions: z.array(z.string()).length(3).describe("Exactly 3 sharp questions, max 15 words each"),
+})
+
+interface CritiqueCallOptions<T extends z.ZodTypeAny> {
+  systemPrompt: string
+  userText: string
+  schema: T
+  schemaName: string
+}
+
+async function critiqueCall<T extends z.ZodTypeAny>(
+  opts: CritiqueCallOptions<T>,
+): Promise<z.infer<T>> {
   const config = loadAIConfig()
   if (!config) throw new Error("No API key configured. Open Settings to add one.")
 
-  const tunedPrompt = applyToneToPrompt(systemPrompt, config.tone)
+  const tunedPrompt = applyToneToPrompt(opts.systemPrompt, config.tone)
+  const { model, providerOptions } = prepareAICall(config)
 
-  const baseUrl = getBaseUrl(config)
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: getProviderHeaders(config),
-    body: JSON.stringify({
-      model: config.modelId,
-      max_tokens: 600,
+  try {
+    const { object } = await generateObject({
+      model,
+      schema: opts.schema,
+      schemaName: opts.schemaName,
+      system: tunedPrompt,
+      prompt: opts.userText,
       temperature: 0.6,
-      messages: [
-        { role: "system", content: tunedPrompt },
-        { role: "user",   content: userText },
-      ],
-      ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(await parseProviderError(response))
+      maxOutputTokens: 600,
+      ...(providerOptions ? { providerOptions } : {}),
+    })
+    return object
+  } catch (err) {
+    if (NoObjectGeneratedError.isInstance(err)) {
+      throw new Error(`Model did not return valid output: ${err.text?.substring(0, 200) ?? "empty response"}`)
+    }
+    throw err
   }
-
-  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null
-  const choices = data?.choices as Array<{ message?: { content?: string } }> | undefined
-  const content = choices?.[0]?.message?.content
-  if (!content) throw new Error("No content in response")
-  return content
 }
 
-/** Generate a counter-argument for a note. Returns prose, ready to become a new note.
- *  Uses JSON mode so "thinking" models (Kimi K2.5 Turbo, DeepSeek R1, etc.) don't
- *  leak chain-of-thought into the response. */
+function escapeNoteText(text: string, contentType: ContentType): string {
+  return `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
+}
+
+/** Generate the strongest counter-argument for a note. Returns prose ready to
+ *  become a new note. Uses structured output so thinking models don't leak CoT. */
 export async function generateSteelman(text: string, contentType: ContentType): Promise<string> {
-  const userText = `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
-  const raw = await callOneShot(STEELMAN_SYSTEM_PROMPT, userText, true)
-
-  const cleaned = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch {
-    // Fallback: if the model leaked CoT before the JSON, find the last {...} block
-    const lastBrace = cleaned.lastIndexOf("{")
-    if (lastBrace !== -1) {
-      try { parsed = JSON.parse(cleaned.slice(lastBrace)) } catch { /* ignore */ }
-    }
-  }
-
-  const counter = (parsed as { counter?: unknown })?.counter
-  if (typeof counter === "string" && counter.trim()) {
-    return counter.trim()
-  }
-  // Last-resort fallback: return the raw output as-is. Better than failing entirely.
-  throw new Error("Model did not return a valid counter object")
+  const result = await critiqueCall({
+    systemPrompt: STEELMAN_SYSTEM_PROMPT,
+    userText: escapeNoteText(text, contentType),
+    schema: SteelmanSchema,
+    schemaName: "steelman",
+  })
+  const counter = result.counter.trim()
+  if (!counter) throw new Error("Model returned an empty counter")
+  return counter
 }
 
-/** Shorten a note's text to a title-style fragment. Returns the new text (max ~8 words).
- *  Uses JSON mode so thinking models don't leak chain-of-thought. */
+/** Shorten a note's text to a title-style fragment (max ~8 words). */
 export async function generateShortTitle(text: string, contentType: ContentType): Promise<string> {
-  const userText = `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
-  const raw = await callOneShot(SHORTEN_SYSTEM_PROMPT, userText, true)
-
-  const cleaned = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch {
-    const lastBrace = cleaned.lastIndexOf("{")
-    if (lastBrace !== -1) {
-      try { parsed = JSON.parse(cleaned.slice(lastBrace)) } catch { /* ignore */ }
-    }
-  }
-
-  const title = (parsed as { title?: unknown })?.title
-  if (typeof title === "string" && title.trim()) {
-    // Strip a trailing period if the model added one despite the instruction.
-    return title.trim().replace(/\.$/, "")
-  }
-  throw new Error("Model did not return a valid title object")
+  const result = await critiqueCall({
+    systemPrompt: SHORTEN_SYSTEM_PROMPT,
+    userText: escapeNoteText(text, contentType),
+    schema: ShortenSchema,
+    schemaName: "short_title",
+  })
+  const title = result.title.trim().replace(/\.$/, "")
+  if (!title) throw new Error("Model returned an empty title")
+  return title
 }
 
-/** Generate 3 Socratic questions about a note. Returns string[] of length 3 (or fewer if model misbehaves). */
+/** Generate 3 Socratic questions about a note. */
 export async function generateSocraticQuestions(text: string, contentType: ContentType): Promise<string[]> {
-  const userText = `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
-  const raw = await callOneShot(SOCRATIC_SYSTEM_PROMPT, userText, true)
-
-  // Extract JSON object — model may wrap with markdown despite our instructions
-  const cleaned = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch {
-    // Fallback: if the model returned a bare array, accept that too
-    try { parsed = JSON.parse(`{"questions":${cleaned}}`) } catch { /* ignore */ }
-  }
-
-  const questions = (parsed as { questions?: unknown })?.questions
-  if (!Array.isArray(questions)) {
-    throw new Error("Model did not return a questions array")
-  }
-  return questions
-    .map(q => String(q ?? "").trim())
+  const result = await critiqueCall({
+    systemPrompt: SOCRATIC_SYSTEM_PROMPT,
+    userText: escapeNoteText(text, contentType),
+    schema: SocraticSchema,
+    schemaName: "socratic_questions",
+  })
+  return result.questions
+    .map(q => q.trim())
     .filter(q => q.length > 0)
     .slice(0, 3)
 }

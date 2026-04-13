@@ -1,8 +1,9 @@
 "use client"
 
-import { loadAIConfig, getBaseUrl, getProviderHeaders, getModelsForProvider } from "@/lib/ai-settings"
+import { streamText, type ModelMessage } from "ai"
+import { loadAIConfig } from "@/lib/ai-settings"
+import { prepareAICall } from "@/lib/ai-client"
 import { exaSearch, formatExaResultsForPrompt } from "@/lib/web-search"
-import { parseProviderError } from "@/lib/ai-enrich"
 import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { TextBlock } from "@/components/tile-card"
 
@@ -11,7 +12,7 @@ export interface ChatMessage {
   role: "user" | "assistant"
   content: string
   timestamp: number
-  /** Source tiles populated when this message was grounded (Exa or native) */
+  /** Source tiles populated when this message was grounded via Exa */
   sources?: { url: string; title: string; siteName: string }[]
 }
 
@@ -22,6 +23,14 @@ export interface SendChatOptions {
   userMessage: string
   /** Optional canvas notes to include as context */
   canvasContext?: TextBlock[]
+}
+
+/** Streaming handle returned by sendChat. The consumer iterates `textStream`
+ *  to render partial content as it arrives, then awaits `done` for the final
+ *  ChatMessage (with sources attached). */
+export interface ChatStreamHandle {
+  textStream: AsyncIterable<string>
+  done: Promise<ChatMessage>
 }
 
 const SYSTEM_PROMPT = `You are a thinking partner embedded in a notetaking tool called nodepad.
@@ -63,110 +72,87 @@ function generateMessageId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export async function sendChat({ history, userMessage, canvasContext }: SendChatOptions): Promise<ChatMessage> {
+/** Send a chat turn and stream the assistant's reply back to the caller.
+ *  Returns immediately with a handle containing an async-iterable token stream
+ *  and a Promise that resolves to the final ChatMessage once the stream finishes. */
+export function sendChat({ history, userMessage, canvasContext }: SendChatOptions): ChatStreamHandle {
   const config = loadAIConfig()
   if (!config) throw new Error("No API key configured. Open Settings to add one.")
 
-  // Optional Exa grounding — same shape as ai-enrich. Failures degrade silently
+  // Optional Exa grounding — pre-fetched before the stream starts so search
+  // results can be injected into the system prompt. Failures degrade silently
   // so a flaky search backend never blocks the chat reply.
-  let exaContext = ""
-  let exaSources: { url: string; title: string; siteName: string }[] = []
-  if (config.groundingMode === "exa") {
-    try {
-      const results = await exaSearch(userMessage.trim().slice(0, 500), config.exaApiKey, 5)
-      exaContext = formatExaResultsForPrompt(results)
-      exaSources = results.map(r => {
-        let siteName = ""
-        try { siteName = new URL(r.url).hostname.replace(/^www\./, "") } catch { /* ignore */ }
-        return { url: r.url, title: r.title || siteName, siteName }
-      })
-    } catch (err) {
-      console.warn("[ai-chat] Exa search failed, continuing without grounding:", err)
-    }
-  }
+  const exaPromise: Promise<{ context: string; sources: ChatMessage["sources"] }> =
+    config.groundingMode === "exa"
+      ? exaSearch(userMessage.trim().slice(0, 500), config.exaApiKey, 5)
+          .then(results => ({
+            context: formatExaResultsForPrompt(results),
+            sources: results.map(r => {
+              let siteName = ""
+              try { siteName = new URL(r.url).hostname.replace(/^www\./, "") } catch { /* ignore */ }
+              return { url: r.url, title: r.title || siteName, siteName }
+            }),
+          }))
+          .catch(err => {
+            console.warn("[ai-chat] Exa search failed, continuing without grounding:", err)
+            return { context: "", sources: undefined }
+          })
+      : Promise.resolve({ context: "", sources: undefined })
 
-  const canvasBlock = canvasContext ? buildCanvasContext(canvasContext) : ""
-  const systemPrompt = applyToneToPrompt(
-    SYSTEM_PROMPT + canvasBlock + exaContext,
-    config.tone,
-  )
+  // Wrap the streamText call in an async generator so we can resolve Exa first
+  // before kicking off the model call. The textStream iterates over the inner
+  // generator's `.textStream`, and `done` resolves once that iteration completes.
 
-  // Native grounding rewrites the model id (OpenRouter `:online`, OpenAI search-preview).
-  let model = config.modelId
-  let webSearchOptions: Record<string, unknown> | undefined
-  if (config.groundingMode === "native") {
-    if (config.provider === "openrouter") {
-      if (!model.endsWith(":online")) model = `${model}:online`
-    } else if (config.provider === "openai") {
-      const modelDef = getModelsForProvider("openai").find(m => m.id === config.modelId)
-      if (modelDef?.groundingModelId) model = modelDef.groundingModelId
-      webSearchOptions = {}
-    }
-  }
-
-  const messages = [
-    { role: "system" as const, content: systemPrompt },
-    ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: "user" as const, content: userMessage },
-  ]
-
-  const baseUrl = getBaseUrl(config)
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: getProviderHeaders(config),
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: 1500,
-      ...(webSearchOptions === undefined
-        ? { temperature: 0.5 }
-        : { web_search_options: webSearchOptions }),
-    }),
+  let resolveDone: (msg: ChatMessage) => void
+  let rejectDone: (err: unknown) => void
+  const done = new Promise<ChatMessage>((res, rej) => {
+    resolveDone = res
+    rejectDone = rej
   })
 
-  if (!response.ok) {
-    throw new Error(await parseProviderError(response))
+  async function* textStream(): AsyncGenerator<string, void, void> {
+    try {
+      const exa = await exaPromise
+      const systemPrompt = applyToneToPrompt(
+        SYSTEM_PROMPT + (canvasContext ? buildCanvasContext(canvasContext) : "") + exa.context,
+        config!.tone,
+      )
+
+      const messages: ModelMessage[] = [
+        ...history.map(m => ({ role: m.role, content: m.content })),
+        { role: "user" as const, content: userMessage },
+      ]
+
+      const { model, providerOptions } = prepareAICall(config!)
+      const result = streamText({
+        model,
+        system: systemPrompt,
+        messages,
+        temperature: 0.5,
+        maxOutputTokens: 1500,
+        ...(providerOptions ? { providerOptions } : {}),
+      })
+
+      let accumulated = ""
+      for await (const chunk of result.textStream) {
+        accumulated += chunk
+        yield chunk
+      }
+
+      resolveDone({
+        id: generateMessageId(),
+        role: "assistant",
+        content: accumulated,
+        timestamp: Date.now(),
+        sources: exa.sources,
+      })
+    } catch (err) {
+      rejectDone(err)
+      throw err
+    }
   }
 
-  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null
-  const choices = data?.choices as
-    | Array<{ message?: { content?: string; annotations?: unknown[] } }>
-    | undefined
-  const content = choices?.[0]?.message?.content
-  if (!content) throw new Error("No content in chat response")
-
-  // Extract native citations (OpenRouter :online and OpenAI search-preview both
-  // attach url_citation annotations on the message).
-  const annotations =
-    (choices?.[0]?.message?.annotations ?? []) as Array<{
-      type: string
-      url_citation?: { url: string; title?: string }
-    }>
-  const seen = new Set<string>()
-  const nativeSources = annotations
-    .filter(a => a.type === "url_citation" && a.url_citation?.url)
-    .map(a => {
-      const { url, title } = a.url_citation!
-      let siteName = ""
-      try { siteName = new URL(url).hostname.replace(/^www\./, "") } catch { /* ignore */ }
-      return { url, title: title || siteName, siteName }
-    })
-    .filter(s => {
-      if (seen.has(s.url)) return false
-      seen.add(s.url)
-      return true
-    })
-
-  const finalSources =
-    nativeSources.length > 0 ? nativeSources : exaSources.length > 0 ? exaSources : undefined
-
-  return {
-    id: generateMessageId(),
-    role: "assistant",
-    content,
-    timestamp: Date.now(),
-    sources: finalSources,
-  }
+  return { textStream: textStream(), done }
 }
 
 export function makeUserMessage(content: string): ChatMessage {

@@ -56,6 +56,10 @@ export default function Page() {
   const [isChatPanelOpen, setIsChatPanelOpen] = useState(false)
   const [isChatWaiting, setIsChatWaiting] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  /** In-progress streaming assistant text for the chat panel. Lives in page
+   *  state but isn't persisted — once the stream completes the final message
+   *  is committed to the project's chatMessages and this is cleared. */
+  const [chatStreamingText, setChatStreamingText] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"tiling" | "kanban" | "graph">("tiling")
   const [isCommandKOpen, setIsCommandKOpen] = useState(false)
   const [jumpToSettings, setJumpToSettings] = useState(false)
@@ -569,6 +573,7 @@ export default function Page() {
     if (!text.trim()) return false
     setChatError(null)
     setIsChatWaiting(true)
+    setChatStreamingText("")
 
     const projectAtSendTime = projectsRef.current.find(p => p.id === activeProjectId)
     const history = projectAtSendTime?.chatMessages ?? []
@@ -576,11 +581,19 @@ export default function Page() {
 
     try {
       const userMsg = makeUserMessage(text)
-      const assistantMsg = await sendChat({
+      const handle = sendChat({
         history,
         userMessage: text,
         canvasContext: canvasNotes,
       })
+
+      let accumulated = ""
+      for await (const chunk of handle.textStream) {
+        accumulated += chunk
+        setChatStreamingText(accumulated)
+      }
+
+      const assistantMsg = await handle.done
       updateActiveProject(p => ({
         ...p,
         chatMessages: [...(p.chatMessages ?? []), userMsg, assistantMsg].slice(-MAX_CHAT_HISTORY),
@@ -592,6 +605,7 @@ export default function Page() {
       return false
     } finally {
       setIsChatWaiting(false)
+      setChatStreamingText(null)
     }
   }, [activeProjectId, updateActiveProject])
 
@@ -1120,6 +1134,7 @@ export default function Page() {
             isOpen={isChatPanelOpen}
             onClose={() => setIsChatPanelOpen(false)}
             messages={activeProject?.chatMessages ?? []}
+            streamingText={chatStreamingText}
             onSend={sendChatMessage}
             onCapture={captureFromChat}
             onClear={clearChat}
