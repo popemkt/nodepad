@@ -10,7 +10,7 @@ import { StatusBar } from "@/components/status-bar"
 import { GhostPanel, type GhostNote } from "@/components/ghost-panel"
 import { ChatPanel } from "@/components/chat-panel"
 import { sendChat, makeUserMessage, type ChatMessage } from "@/lib/ai-chat"
-import { generateSteelman, generateSocraticQuestions } from "@/lib/ai-critique"
+import { generateSteelman, generateSocraticQuestions, generateShortTitle } from "@/lib/ai-critique"
 import { VimInput } from "@/components/vim-input"
 import { IntroModal } from "@/components/intro-modal"
 import type { HighlightTarget, TextBlock } from "@/components/tile-card"
@@ -697,6 +697,26 @@ export default function Page() {
     }
   }, [addBlock])
 
+  const shortenTitleForBlock = useCallback(async (id: string) => {
+    const block = blocksRef.current.find(b => b.id === id)
+    if (!block) return
+    // Snapshot first so Cmd+Z restores the original phrasing. Don't re-enrich
+    // automatically — the existing annotation may still be relevant, and the
+    // user can click Re-enrich themselves if they want a fresh pass.
+    pushHistory(activeProjectId, blocksRef.current)
+    try {
+      const shortened = await generateShortTitle(block.text, block.contentType)
+      if (shortened) {
+        updateActiveProject(p => ({
+          ...p,
+          blocks: p.blocks.map(b => b.id === id ? { ...b, text: shortened } : b),
+        }))
+      }
+    } catch (e) {
+      console.warn("[shorten]", e)
+    }
+  }, [activeProjectId, pushHistory, updateActiveProject])
+
   const generateSocraticForBlock = useCallback(async (id: string) => {
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
@@ -1047,6 +1067,7 @@ export default function Page() {
                   onChangeType={handleChangeType}
                   onSteelman={generateSteelmanForBlock}
                   onSocratic={generateSocraticForBlock}
+                  onShortenTitle={shortenTitleForBlock}
                   onToggleCollapse={toggleCollapse}
                   onTogglePin={handleTogglePin}
                   onToggleSubTask={handleToggleSubTask}
@@ -1065,6 +1086,7 @@ export default function Page() {
                   onChangeType={handleChangeType}
                   onSteelman={generateSteelmanForBlock}
                   onSocratic={generateSocraticForBlock}
+                  onShortenTitle={shortenTitleForBlock}
                   onToggleCollapse={toggleCollapse}
                   onTogglePin={handleTogglePin}
                   onToggleSubTask={handleToggleSubTask}
@@ -1081,6 +1103,7 @@ export default function Page() {
                   onChangeType={handleChangeType}
                   onSteelman={generateSteelmanForBlock}
                   onSocratic={generateSocraticForBlock}
+                  onShortenTitle={shortenTitleForBlock}
                   onTogglePin={handleTogglePin}
                   onEdit={editBlock}
                   onEditAnnotation={editAnnotation}

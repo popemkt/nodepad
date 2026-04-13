@@ -2,6 +2,7 @@
 
 import { loadAIConfig, getBaseUrl, getProviderHeaders } from "@/lib/ai-settings"
 import { parseProviderError } from "@/lib/ai-enrich"
+import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { ContentType } from "@/lib/content-types"
 
 // Critique tools — features that challenge an existing note rather than
@@ -26,6 +27,22 @@ Respond with a single JSON object: {"counter": "<the counter-argument prose>"}.
 - The "counter" field contains the final 2–4 sentence rebuttal, nothing else.
 - No markdown code fences around the JSON.`
 
+const SHORTEN_SYSTEM_PROMPT = `You are an editor embedded in a notetaking tool. Your job: rewrite the user's note as a sharp, title-style fragment.
+
+Rules:
+- Maximum 8 words. Aim for 4–6.
+- Title-style fragment, NOT a full sentence. No trailing period.
+- Preserve the core noun phrase or claim — strip qualifiers, hedges, and connectives.
+- Keep proper nouns and numbers exactly as written.
+- Do not editorialise, summarise, or add information that wasn't there.
+- Match the language of the original note.
+
+## Output Format — CRITICAL
+Respond with a single JSON object: {"title": "<the shortened version>"}.
+- No reasoning, no chain-of-thought, no preamble — only the JSON object.
+- The "title" field contains the shortened text, nothing else.
+- No markdown code fences around the JSON.`
+
 const SOCRATIC_SYSTEM_PROMPT = `You are a Socratic prompter embedded in a notetaking tool.
 
 Your job: given a note the user wrote, return **3 sharp questions** that the note raises but does not answer. The kind of questions a thoughtful person would ask themselves before accepting the note as-is — gaps, hidden assumptions, missing distinctions, unexplored implications.
@@ -43,6 +60,8 @@ async function callOneShot(systemPrompt: string, userText: string, jsonMode: boo
   const config = loadAIConfig()
   if (!config) throw new Error("No API key configured. Open Settings to add one.")
 
+  const tunedPrompt = applyToneToPrompt(systemPrompt, config.tone)
+
   const baseUrl = getBaseUrl(config)
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -52,7 +71,7 @@ async function callOneShot(systemPrompt: string, userText: string, jsonMode: boo
       max_tokens: 600,
       temperature: 0.6,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: tunedPrompt },
         { role: "user",   content: userText },
       ],
       ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
@@ -95,6 +114,31 @@ export async function generateSteelman(text: string, contentType: ContentType): 
   }
   // Last-resort fallback: return the raw output as-is. Better than failing entirely.
   throw new Error("Model did not return a valid counter object")
+}
+
+/** Shorten a note's text to a title-style fragment. Returns the new text (max ~8 words).
+ *  Uses JSON mode so thinking models don't leak chain-of-thought. */
+export async function generateShortTitle(text: string, contentType: ContentType): Promise<string> {
+  const userText = `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
+  const raw = await callOneShot(SHORTEN_SYSTEM_PROMPT, userText, true)
+
+  const cleaned = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch {
+    const lastBrace = cleaned.lastIndexOf("{")
+    if (lastBrace !== -1) {
+      try { parsed = JSON.parse(cleaned.slice(lastBrace)) } catch { /* ignore */ }
+    }
+  }
+
+  const title = (parsed as { title?: unknown })?.title
+  if (typeof title === "string" && title.trim()) {
+    // Strip a trailing period if the model added one despite the instruction.
+    return title.trim().replace(/\.$/, "")
+  }
+  throw new Error("Model did not return a valid title object")
 }
 
 /** Generate 3 Socratic questions about a note. Returns string[] of length 3 (or fewer if model misbehaves). */

@@ -2,6 +2,7 @@
 
 import { loadAIConfig, getBaseUrl, getProviderHeaders } from "@/lib/ai-settings"
 import { parseProviderError } from "@/lib/ai-enrich"
+import { applyToneToPrompt } from "@/lib/tone-presets"
 
 export interface GhostContext {
   text: string
@@ -51,6 +52,10 @@ ${context.map(c =>
 Return ONLY valid JSON:
 {"text": "...", "category": "..."}`
 
+  // Tones are appended to the prompt body since ghost uses a single user message
+  // (no separate system message). Same applyToneToPrompt helper as everywhere else.
+  const tunedPrompt = applyToneToPrompt(prompt, config.tone)
+
   // Ghost synthesis is always a short JSON object (15–25 word thesis + category).
   // Cap output to keep cost low and avoid 402 on limited-credit accounts.
   const MAX_GHOST_OUTPUT_TOKENS = 220
@@ -62,7 +67,7 @@ Return ONLY valid JSON:
     body: JSON.stringify({
       model,
       max_tokens: MAX_GHOST_OUTPUT_TOKENS,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: tunedPrompt }],
       response_format: { type: "json_object" },
       temperature: 0.7,
     }),

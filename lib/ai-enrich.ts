@@ -3,6 +3,7 @@
 import { detectContentType } from "@/lib/detect-content-type"
 import { loadAIConfig, getBaseUrl, getProviderHeaders, getModelsForProvider } from "@/lib/ai-settings"
 import { exaSearch, formatExaResultsForPrompt, type WebSearchResult } from "@/lib/web-search"
+import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { ContentType } from "@/lib/content-types"
 
 // ── Provider error parser ─────────────────────────────────────────────────────
@@ -342,7 +343,10 @@ You have live web access. For this note type, include 1–2 real source citation
     ? `\n\n## Output Format — CRITICAL\nYou MUST respond with a single JSON object (no markdown, no explanation). Schema:\n${JSON.stringify(JSON_SCHEMA.schema, null, 2)}`
     : ""
 
-  const systemPrompt = SYSTEM_PROMPT + groundingNote + exaContext + schemaHint
+  const systemPrompt = applyToneToPrompt(
+    SYSTEM_PROMPT + groundingNote + exaContext + schemaHint,
+    config.tone,
+  )
 
   const categoryContext = category
     ? `\n\nThe user has assigned this note the category "${category}".`

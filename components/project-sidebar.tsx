@@ -18,6 +18,7 @@ import {
   EyeOff,
   Save,
   FolderInput,
+  Mic,
 } from "lucide-react"
 import {
   AI_PROVIDER_PRESETS,
@@ -26,6 +27,14 @@ import {
   type AISettings,
   type AIProvider,
 } from "@/lib/ai-settings"
+import {
+  DEFAULT_TONE_PRESETS,
+  DEFAULT_TONE_ID,
+  getCustomToneInstructionError,
+  MAX_CUSTOM_TONE_CHARS,
+  makeCustomToneId,
+  type TonePreset,
+} from "@/lib/tone-presets"
 
 interface Project {
   id: string
@@ -74,6 +83,10 @@ export function ProjectSidebar({
   const [showExaKey, setShowExaKey] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [providerOpen, setProviderOpen] = useState(false)
+  const [toneOpen, setToneOpen] = useState(false)
+  const [toneAddOpen, setToneAddOpen] = useState(false)
+  const [newToneName, setNewToneName] = useState("")
+  const [newToneInstruction, setNewToneInstruction] = useState("")
   // local draft for settings (only save on "Save")
   const [draft, setDraft] = useState<AISettings>(aiSettings)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -133,6 +146,44 @@ export function ProjectSidebar({
 
   const currentPreset = getPreset(draft.provider)
   const models = getModelsForProvider(draft.provider)
+
+  // Tone preset helpers — defaults are merged with user-added customs at read time
+  const allTonePresets: TonePreset[] = [...DEFAULT_TONE_PRESETS, ...(draft.customTonePresets ?? [])]
+  const activeTonePreset =
+    allTonePresets.find(t => t.id === (draft.activeToneId ?? DEFAULT_TONE_ID))
+    ?? DEFAULT_TONE_PRESETS[0]
+  const customToneInstructionError =
+    newToneInstruction.trim().length === 0 ? null : getCustomToneInstructionError(newToneInstruction)
+
+  const handleAddCustomTone = () => {
+    const name = newToneName.trim()
+    const instruction = newToneInstruction.trim()
+    const instructionError = getCustomToneInstructionError(instruction)
+    if (!name || !instruction || instructionError) return
+    const newPreset: TonePreset = {
+      id: makeCustomToneId(name),
+      name,
+      description: "Custom",
+      instruction,
+    }
+    setDraft(d => ({
+      ...d,
+      customTonePresets: [...(d.customTonePresets ?? []), newPreset],
+      activeToneId: newPreset.id,
+    }))
+    setNewToneName("")
+    setNewToneInstruction("")
+    setToneAddOpen(false)
+  }
+
+  const handleDeleteCustomTone = (id: string) => {
+    setDraft(d => {
+      const filtered = (d.customTonePresets ?? []).filter(t => t.id !== id)
+      // If we just deleted the active preset, fall back to default
+      const newActive = d.activeToneId === id ? DEFAULT_TONE_ID : d.activeToneId
+      return { ...d, customTonePresets: filtered, activeToneId: newActive }
+    })
+  }
   const selectedModel = models.find(m => m.id === draft.modelId) || models[0] || undefined
 
   return (
@@ -454,6 +505,147 @@ export function ProjectSidebar({
                       </AnimatePresence>
                     </div>
                   )}
+                </div>
+
+                {/* Tone preset — applied to every AI operation (enrichment, chat,
+                    synthesis, steelman, Socratic) via tone-presets.ts. */}
+                <div className="flex flex-col gap-2">
+                  <label className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                    Tone
+                  </label>
+                  <div className="relative">
+                    <button
+                      onClick={() => setToneOpen(v => !v)}
+                      className="flex w-full items-center justify-between rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 text-left hover:bg-white/[0.07] focus:outline-none transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Mic className="h-3 w-3 shrink-0 text-primary/60" />
+                        <div className="min-w-0">
+                          <div className="font-mono text-[11px] font-bold text-foreground truncate">{activeTonePreset.name}</div>
+                          <div className="font-mono text-[9px] text-muted-foreground mt-0.5 truncate">{activeTonePreset.description}</div>
+                        </div>
+                      </div>
+                      <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform shrink-0 ${toneOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    <AnimatePresence>
+                      {toneOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.1 }}
+                          className="absolute top-full left-0 right-0 z-20 mt-1 overflow-hidden rounded-md border border-white/10 bg-[#0d0d10] shadow-xl max-h-[280px] overflow-y-auto custom-scrollbar"
+                        >
+                          {allTonePresets.map(tone => {
+                            const isActive = tone.id === activeTonePreset.id
+                            const isCustom = !tone.builtin
+                            return (
+                              <div
+                                key={tone.id}
+                                className={`flex items-start gap-2 px-2.5 py-2 hover:bg-white/5 transition-colors ${isActive ? "bg-white/[0.03]" : ""}`}
+                              >
+                                <button
+                                  onClick={() => {
+                                    setDraft(d => ({ ...d, activeToneId: tone.id }))
+                                    setToneOpen(false)
+                                  }}
+                                  className="flex flex-1 items-start gap-2 text-left min-w-0"
+                                >
+                                  <div className={`flex h-3.5 w-3.5 mt-0.5 shrink-0 items-center justify-center rounded border ${
+                                    isActive ? "border-primary bg-primary/20" : "border-white/10"
+                                  }`}>
+                                    {isActive && <Check className="h-2.5 w-2.5 text-primary" />}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="font-mono text-[10px] font-bold text-foreground">{tone.name}</div>
+                                    <div className="font-mono text-[9px] text-muted-foreground leading-relaxed">{tone.description}</div>
+                                  </div>
+                                </button>
+                                {isCustom && (
+                                  <button
+                                    onClick={() => handleDeleteCustomTone(tone.id)}
+                                    className="shrink-0 mt-0.5 text-muted-foreground/30 hover:text-destructive transition-colors"
+                                    title="Delete custom preset"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                          <button
+                            onClick={() => {
+                              setToneAddOpen(true)
+                              setToneOpen(false)
+                            }}
+                            className="flex w-full items-center gap-2 px-2.5 py-2 text-left border-t border-white/5 hover:bg-white/5 transition-colors"
+                          >
+                            <Plus className="h-3 w-3 text-primary/70" />
+                            <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-primary/80">
+                              Add custom tone
+                            </span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Inline form for adding a custom preset */}
+                  <AnimatePresence>
+                    {toneAddOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex flex-col gap-2 rounded-md border border-primary/20 bg-primary/[0.04] p-2.5">
+                          <input
+                            type="text"
+                            value={newToneName}
+                            onChange={e => setNewToneName(e.target.value)}
+                            placeholder="Tone name (e.g. Lawyer)"
+                            className="w-full bg-black/30 border border-white/10 rounded-sm px-2 py-1.5 font-mono text-[10px] text-foreground outline-none focus:border-primary/40 placeholder:text-muted-foreground/40"
+                            autoFocus
+                          />
+                          <textarea
+                            value={newToneInstruction}
+                            onChange={e => setNewToneInstruction(e.target.value)}
+                            placeholder="Style brief quoted into every AI prompt — e.g. &quot;Voice: careful lawyer. Qualify claims, surface assumptions, stress the strongest counter-position.&quot;"
+                            rows={4}
+                            className="w-full resize-y bg-black/30 border border-white/10 rounded-sm px-2 py-1.5 font-mono text-[10px] text-foreground outline-none focus:border-primary/40 placeholder:text-muted-foreground/40 custom-scrollbar"
+                          />
+                          <p className={`font-mono text-[9px] leading-relaxed ${
+                            customToneInstructionError ? "text-destructive/80" : "text-muted-foreground/50"
+                          }`}>
+                            {customToneInstructionError
+                              ?? `Style-only. Custom tones can change voice and framing, but not JSON, markdown, list, or other output rules. Max ${MAX_CUSTOM_TONE_CHARS} characters.`}
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={handleAddCustomTone}
+                              disabled={!newToneName.trim() || !newToneInstruction.trim() || !!customToneInstructionError}
+                              className="flex items-center gap-1 px-2 py-1 rounded-sm bg-primary/20 hover:bg-primary/30 disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[9px] font-bold uppercase tracking-wider text-primary transition-colors"
+                            >
+                              <Check className="h-2.5 w-2.5" />
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setToneAddOpen(false)
+                                setNewToneName("")
+                                setNewToneInstruction("")
+                              }}
+                              className="px-2 py-1 rounded-sm hover:bg-white/5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Web Grounding — works for any provider when an Exa key is set,
