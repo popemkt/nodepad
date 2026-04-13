@@ -11,7 +11,7 @@ interface ChatPanelProps {
   isOpen: boolean
   onClose: () => void
   messages: ChatMessage[]
-  onSend: (text: string, includeCanvasContext: boolean) => Promise<void>
+  onSend: (text: string, includeCanvasContext: boolean) => Promise<boolean>
   onCapture: (text: string) => void
   onClear: () => void
   isWaiting: boolean
@@ -79,8 +79,8 @@ export function ChatPanel({
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed || isWaiting || !hasApiKey) return
-    setInput("")
-    await onSend(trimmed, includeContext && hasCanvasNotes)
+    const didSend = await onSend(trimmed, includeContext && hasCanvasNotes)
+    if (didSend) setInput("")
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -137,7 +137,8 @@ export function ChatPanel({
             {messages.length > 0 && (
               <button
                 onClick={onClear}
-                className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-1 rounded-sm text-muted-foreground/40 hover:text-foreground hover:bg-white/5 transition-colors"
+                disabled={isWaiting}
+                className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-1 rounded-sm text-muted-foreground/40 hover:text-foreground hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
                 title="Clear conversation"
               >
                 Clear

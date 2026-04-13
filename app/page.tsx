@@ -544,7 +544,7 @@ export default function Page() {
 
   // ── Chat panel ───────────────────────────────────────────────────────────
   const sendChatMessage = useCallback(async (text: string, includeCanvasContext: boolean) => {
-    if (!text.trim()) return
+    if (!text.trim()) return false
     setChatError(null)
     setIsChatWaiting(true)
 
@@ -552,14 +552,8 @@ export default function Page() {
     const history = projectAtSendTime?.chatMessages ?? []
     const canvasNotes = includeCanvasContext ? (projectAtSendTime?.blocks ?? []) : undefined
 
-    // Optimistically append the user message
-    const userMsg = makeUserMessage(text)
-    updateActiveProject(p => ({
-      ...p,
-      chatMessages: [...(p.chatMessages ?? []), userMsg].slice(-MAX_CHAT_HISTORY),
-    }))
-
     try {
+      const userMsg = makeUserMessage(text)
       const assistantMsg = await sendChat({
         history,
         userMessage: text,
@@ -567,11 +561,13 @@ export default function Page() {
       })
       updateActiveProject(p => ({
         ...p,
-        chatMessages: [...(p.chatMessages ?? []), assistantMsg].slice(-MAX_CHAT_HISTORY),
+        chatMessages: [...(p.chatMessages ?? []), userMsg, assistantMsg].slice(-MAX_CHAT_HISTORY),
       }))
+      return true
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setChatError(message)
+      return false
     } finally {
       setIsChatWaiting(false)
     }
