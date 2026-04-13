@@ -17,7 +17,6 @@ interface StatusBarProps {
   isGhostPanelOpen: boolean
   ghostNoteCount: number
   isChatPanelOpen: boolean
-  chatMessageCount: number
   onMenuClick: () => void
   onIndexToggle: () => void
   onGhostPanelToggle: () => void
@@ -36,7 +35,6 @@ export function StatusBar({
   isGhostPanelOpen,
   ghostNoteCount,
   isChatPanelOpen,
-  chatMessageCount,
   onMenuClick,
   onIndexToggle,
   onGhostPanelToggle,
@@ -169,10 +167,10 @@ export function StatusBar({
           <span className="font-mono text-[10px] text-muted-foreground tabular-nums" suppressHydrationWarning>
             {time}
           </span>
-          {/* Chat panel toggle with badge */}
+          {/* Chat panel toggle */}
           <button
             onClick={onChatPanelToggle}
-            className={`relative p-1.5 rounded-sm transition-all duration-200 ${
+            className={`p-1.5 rounded-sm transition-all duration-200 ${
               isChatPanelOpen
                 ? "bg-primary/20 text-primary shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)]"
                 : "hover:bg-secondary text-muted-foreground/50 hover:text-foreground"
@@ -180,11 +178,6 @@ export function StatusBar({
             title="Chat Panel"
           >
             <MessageSquare className="h-4 w-4" />
-            {chatMessageCount > 0 && !isChatPanelOpen && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary font-mono text-[7px] font-black text-primary-foreground">
-                {chatMessageCount}
-              </span>
-            )}
           </button>
 
           {/* Ghost panel toggle with badge */}

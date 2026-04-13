@@ -927,7 +927,6 @@ export default function Page() {
           isGhostPanelOpen={isGhostPanelOpen}
           ghostNoteCount={ghostNotes.filter(n => !n.isGenerating).length}
           isChatPanelOpen={isChatPanelOpen}
-          chatMessageCount={(activeProject?.chatMessages ?? []).length}
           activeProjectName={activeProject?.name || ""}
           onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
           onIndexToggle={() => setIsIndexOpen(!isIndexOpen)}
