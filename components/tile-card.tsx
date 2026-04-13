@@ -419,6 +419,22 @@ export const TileCard = memo(function TileCard({
               <Tag className="h-2.5 w-2.5" />
             </button>
           )}
+          {/* Re-enrich button — runs the annotation pass again. Pushes an undo
+              snapshot in the parent so Cmd+Z restores the previous annotation. */}
+          {!effectiveCollapsed && block.contentType !== "thesis" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onReEnrich(block.id)
+              }}
+              disabled={block.isEnriching}
+              className="flex h-4 w-4 items-center justify-center rounded-sm transition-all opacity-40 hover:opacity-100 hover:bg-black/10 disabled:cursor-not-allowed"
+              title="Re-enrich (undoable)"
+              aria-label="Re-enrich note"
+            >
+              <RefreshCw className={`h-2.5 w-2.5 ${block.isEnriching ? "animate-spin opacity-50" : ""}`} />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation()
