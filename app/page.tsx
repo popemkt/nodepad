@@ -10,6 +10,7 @@ import { StatusBar } from "@/components/status-bar"
 import { GhostPanel, type GhostNote } from "@/components/ghost-panel"
 import { ChatPanel } from "@/components/chat-panel"
 import { sendChat, makeUserMessage, type ChatMessage } from "@/lib/ai-chat"
+import { generateSteelman, generateSocraticQuestions } from "@/lib/ai-critique"
 import { VimInput } from "@/components/vim-input"
 import { IntroModal } from "@/components/intro-modal"
 import type { TextBlock } from "@/components/tile-card"
@@ -409,6 +410,11 @@ export default function Page() {
             .map((idx) => context[idx]?.id)
             .filter(Boolean) as string[]
         : []
+      const contradicts = data.contradictsIndices
+        ? (data.contradictsIndices as number[])
+            .map((idx) => context[idx]?.id)
+            .filter(Boolean) as string[]
+        : []
 
       setProjects((current: Project[]) => {
         const mergeTargetIdx = data.mergeWithIndex
@@ -430,6 +436,7 @@ export default function Page() {
                   annotation: data.annotation,
                   confidence: data.confidence,
                   influencedBy,
+                  contradicts,
                   isUnrelated: data.isUnrelated,
                   sources: data.sources ?? undefined,
                   isEnriching: false,
@@ -489,6 +496,7 @@ export default function Page() {
               annotation: data.annotation,
               confidence: data.confidence,
               influencedBy,
+              contradicts,
               isUnrelated: data.isUnrelated,
               sources: data.sources ?? undefined,
               isEnriching: false,
@@ -516,6 +524,10 @@ export default function Page() {
     if (!note || note.isGenerating) return
     const newId = generateId()
     const { text, category } = note
+    // Synthesis ghosts become thesis notes (existing behavior). Socratic
+    // question ghosts become question-type notes — they're literal questions,
+    // not synthesized theses, and should classify accordingly.
+    const claimedType: ContentType = note.kind === "question" ? "question" : "thesis"
 
     updateActiveProject(p => {
       const updatedProject = {
@@ -524,13 +536,13 @@ export default function Page() {
           id: newId,
           text,
           timestamp: Date.now(),
-          contentType: "thesis" as ContentType,
+          contentType: claimedType,
           category,
           isEnriching: true
         }],
         ghostNotes: (p.ghostNotes || []).filter(n => n.id !== id),
       }
-      enrichBlock(p.id, newId, text, category, "thesis")
+      enrichBlock(p.id, newId, text, category, claimedType)
       return updatedProject
     })
   }, [activeProject, updateActiveProject, enrichBlock])
@@ -607,7 +619,7 @@ export default function Page() {
   }, [isCommandKOpen, isGhostPanelOpen, isChatPanelOpen, undo])
 
   const addBlock = useCallback(
-    (text: string, forcedType?: ContentType) => {
+    (text: string, forcedType?: ContentType, extraFields?: Partial<TextBlock>) => {
       // Parse inline #type tag  e.g. "#claim The earth is 4.5 billion years old"
       let resolvedText = text
       let resolvedType = forcedType
@@ -653,14 +665,66 @@ export default function Page() {
           timestamp: Date.now(),
           contentType: initialDisplayType,
           isEnriching: true,
+          ...(extraFields ?? {}),
         }]
       }))
 
       setIsCommandKOpen(false)
       enrichBlock(activeProjectId, newId, resolvedText, undefined, enrichForcedType).catch(console.error)
+      return newId
     },
     [activeProjectId, pushHistory, updateActiveProject, enrichBlock]
   )
+
+  const generateSteelmanForBlock = useCallback(async (id: string) => {
+    const block = blocksRef.current.find(b => b.id === id)
+    if (!block) return
+    try {
+      const counter = await generateSteelman(block.text, block.contentType)
+      if (counter) addBlock(counter, undefined, { counterTo: id })
+    } catch (e) {
+      console.warn("[steelman]", e)
+    }
+  }, [addBlock])
+
+  const generateSocraticForBlock = useCallback(async (id: string) => {
+    const block = blocksRef.current.find(b => b.id === id)
+    if (!block) return
+    // Insert a generating placeholder ghost note immediately so the user gets
+    // feedback that something is happening, then replace it with real ones.
+    const placeholderId = generateId()
+    updateActiveProject(p => ({
+      ...p,
+      ghostNotes: [
+        ...(p.ghostNotes || []),
+        { id: placeholderId, text: "", category: block.category || "", isGenerating: true, kind: "question" },
+      ],
+    }))
+    setIsGhostPanelOpen(true)
+
+    try {
+      const questions = await generateSocraticQuestions(block.text, block.contentType)
+      updateActiveProject(p => ({
+        ...p,
+        ghostNotes: [
+          ...(p.ghostNotes || []).filter(g => g.id !== placeholderId),
+          ...questions.map(q => ({
+            id: generateId(),
+            text: q,
+            category: block.category || "",
+            isGenerating: false,
+            kind: "question" as const,
+          })),
+        ],
+      }))
+    } catch (e) {
+      console.warn("[socratic]", e)
+      updateActiveProject(p => ({
+        ...p,
+        ghostNotes: (p.ghostNotes || []).filter(g => g.id !== placeholderId),
+      }))
+    }
+  }, [updateActiveProject])
 
   const captureFromChat = useCallback((text: string) => {
     addBlock(text)
@@ -971,6 +1035,8 @@ export default function Page() {
                   onEditAnnotation={editAnnotation}
                   onReEnrich={reEnrichBlock}
                   onChangeType={handleChangeType}
+                  onSteelman={generateSteelmanForBlock}
+                  onSocratic={generateSocraticForBlock}
                   onToggleCollapse={toggleCollapse}
                   onTogglePin={handleTogglePin}
                   onToggleSubTask={handleToggleSubTask}
@@ -987,6 +1053,8 @@ export default function Page() {
                   onEditAnnotation={editAnnotation}
                   onReEnrich={reEnrichBlock}
                   onChangeType={handleChangeType}
+                  onSteelman={generateSteelmanForBlock}
+                  onSocratic={generateSocraticForBlock}
                   onToggleCollapse={toggleCollapse}
                   onTogglePin={handleTogglePin}
                   onToggleSubTask={handleToggleSubTask}
@@ -1001,6 +1069,8 @@ export default function Page() {
                   projectName={activeProject.name}
                   onReEnrich={reEnrichBlock}
                   onChangeType={handleChangeType}
+                  onSteelman={generateSteelmanForBlock}
+                  onSocratic={generateSocraticForBlock}
                   onTogglePin={handleTogglePin}
                   onEdit={editBlock}
                   onEditAnnotation={editAnnotation}

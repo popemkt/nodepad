@@ -1,13 +1,17 @@
 "use client"
 
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, Sparkles, X } from "lucide-react"
+import { Check, Sparkles, X, HelpCircle } from "lucide-react"
 
 export interface GhostNote {
   id: string
   text: string
   category: string
   isGenerating: boolean
+  /** Where this ghost came from. "synthesis" = emergent thesis from canvas
+   *  (existing behavior, default). "question" = Socratic question generated
+   *  from a specific note. Affects icon and the contentType when claimed. */
+  kind?: "synthesis" | "question"
 }
 
 interface GhostPanelProps {
@@ -72,15 +76,19 @@ export function GhostPanel({ ghostNotes, isOpen, onClose, onClaim, onDismiss }: 
                   transition={{ duration: 0.2 }}
                   className="rounded-md border border-primary/20 bg-primary/5 p-3 flex flex-col gap-3"
                 >
-                  {/* Row: sparkles + category + dismiss */}
+                  {/* Row: kind icon + label + dismiss */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      <Sparkles className="h-3 w-3 text-primary/50 shrink-0" />
-                      {note.category && !note.isGenerating && (
-                        <span className="font-mono text-[8px] uppercase tracking-widest text-muted-foreground/50">
-                          {note.category}
-                        </span>
+                      {note.kind === "question" ? (
+                        <HelpCircle className="h-3 w-3 text-primary/50 shrink-0" />
+                      ) : (
+                        <Sparkles className="h-3 w-3 text-primary/50 shrink-0" />
                       )}
+                      <span className="font-mono text-[8px] uppercase tracking-widest text-muted-foreground/50">
+                        {note.isGenerating
+                          ? (note.kind === "question" ? "questioning" : "synthesizing")
+                          : (note.kind === "question" ? "question" : (note.category || ""))}
+                      </span>
                     </div>
                     {!note.isGenerating && (
                       <button

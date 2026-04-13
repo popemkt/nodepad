@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag } from "lucide-react"
+import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link as LinkIcon, Sparkles, Tag, Swords, HelpCircle, AlertTriangle } from "lucide-react"
 import { motion } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -24,6 +24,12 @@ export interface TextBlock {
   isUnrelated?: boolean
   isPinned?: boolean
   subTasks?: { id: string; text: string; isDone: boolean; timestamp: number }[]
+  /** Block id this note is a steelman/counter of. Set when generated via the
+   *  "Counter" button on another tile. */
+  counterTo?: string
+  /** Block ids whose claims this note contradicts. Populated by enrichment when
+   *  the model detects a tension with existing notes. */
+  contradicts?: string[]
 }
 
 interface TileCardProps {
@@ -45,6 +51,10 @@ interface TileCardProps {
   isConnectionLocked?: boolean
   allBlocks?: TextBlock[]
   onChangeType?: (id: string, newType: ContentType) => void
+  /** Generate a steelman / strongest counter-argument for this note. */
+  onSteelman?: (id: string) => void
+  /** Generate Socratic questions about this note (added as ghost notes). */
+  onSocratic?: (id: string) => void
 }
 
 // Custom Markdown components for styling
@@ -101,6 +111,8 @@ export const TileCard = memo(function TileCard({
   allBlocks,
   hideCollapse = false,
   onChangeType,
+  onSteelman,
+  onSocratic,
 }: TileCardProps) {
   // In tiling view, collapse is disabled — BSP layout can't redistribute freed space
   const effectiveCollapsed = hideCollapse ? false : isCollapsed
@@ -419,6 +431,34 @@ export const TileCard = memo(function TileCard({
               <Tag className="h-2.5 w-2.5" />
             </button>
           )}
+          {/* Socratic questions — generates 3 questions about this note as ghost notes */}
+          {!effectiveCollapsed && onSocratic && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onSocratic(block.id)
+              }}
+              className="flex h-4 w-4 items-center justify-center rounded-sm transition-all opacity-40 hover:opacity-100 hover:bg-black/10"
+              title="Generate Socratic questions (Synthesis panel)"
+              aria-label="Generate Socratic questions"
+            >
+              <HelpCircle className="h-2.5 w-2.5" />
+            </button>
+          )}
+          {/* Steelman — generates the strongest counter-argument as a new note */}
+          {!effectiveCollapsed && onSteelman && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onSteelman(block.id)
+              }}
+              className="flex h-4 w-4 items-center justify-center rounded-sm transition-all opacity-40 hover:opacity-100 hover:bg-black/10"
+              title="Steelman: generate the strongest counter-argument"
+              aria-label="Generate counter-argument"
+            >
+              <Swords className="h-2.5 w-2.5" />
+            </button>
+          )}
           {/* Re-enrich button — runs the annotation pass again. Pushes an undo
               snapshot in the parent so Cmd+Z restores the previous annotation. */}
           {!effectiveCollapsed && block.contentType !== "thesis" && (
@@ -673,6 +713,80 @@ export const TileCard = memo(function TileCard({
                       <span className="opacity-70">#</span>
                       <span className="truncate max-w-[120px]">{block.category || "no-topic"}</span>
                     </span>
+
+                    {/* Counter-to badge — this note is a steelman of another */}
+                    {block.counterTo && (() => {
+                      const parent = allBlocks?.find(b => b.id === block.counterTo)
+                      const parentPreview = parent ? parent.text.substring(0, 40) + (parent.text.length > 40 ? "…" : "") : "deleted note"
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (block.counterTo) onHighlight?.(block.counterTo)
+                          }}
+                          onMouseEnter={() => block.counterTo && onHighlight?.(block.counterTo)}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-all"
+                          title={`Counter to: ${parentPreview}`}
+                        >
+                          <Swords className="h-2.5 w-2.5 text-amber-400" />
+                          <span className="font-mono text-[9px] font-bold text-amber-400 uppercase tracking-tighter">
+                            Counter
+                          </span>
+                        </button>
+                      )
+                    })()}
+
+                    {/* Contradicts badge — this note flagged a tension with N existing notes */}
+                    {block.contradicts && block.contradicts.length > 0 && (() => {
+                      const refs = block.contradicts
+                        .map(id => allBlocks?.find(b => b.id === id))
+                        .filter(Boolean) as TextBlock[]
+                      const tooltip = refs.length > 0
+                        ? "Contradicts:\n" + refs.map(r => "• " + r.text.substring(0, 50)).join("\n")
+                        : "Contradicts other notes"
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (refs[0]) onHighlight?.(refs[0].id)
+                          }}
+                          onMouseEnter={() => refs.forEach(r => onHighlight?.(r.id))}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
+                          title={tooltip}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5 text-red-400" />
+                          <span className="font-mono text-[9px] font-bold text-red-400 uppercase tracking-tighter">
+                            Contradicts {block.contradicts.length}
+                          </span>
+                        </button>
+                      )
+                    })()}
+
+                    {/* Contradicted-by badge — computed back-reference: any other block whose contradicts[] includes us */}
+                    {(() => {
+                      const contradictors = (allBlocks ?? []).filter(b => b.contradicts?.includes(block.id))
+                      if (contradictors.length === 0) return null
+                      const tooltip = "Contradicted by:\n" + contradictors.map(r => "• " + r.text.substring(0, 50)).join("\n")
+                      return (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onHighlight?.(contradictors[0].id)
+                          }}
+                          onMouseEnter={() => contradictors.forEach(r => onHighlight?.(r.id))}
+                          onMouseLeave={() => onHighlight?.(null)}
+                          className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
+                          title={tooltip}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5 text-red-400 rotate-180" />
+                          <span className="font-mono text-[9px] font-bold text-red-400 uppercase tracking-tighter">
+                            Disputed by {contradictors.length}
+                          </span>
+                        </button>
+                      )
+                    })()}
 
                     {block.influencedBy && block.influencedBy.length > 0 && (
                       <div className="group/influences relative">

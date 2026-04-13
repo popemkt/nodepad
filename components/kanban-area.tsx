@@ -15,6 +15,8 @@ interface KanbanAreaProps {
   onEditAnnotation: (id: string, newAnnotation: string) => void
   onReEnrich: (id: string, newCategory?: string) => void
   onChangeType: (id: string, newType: import("@/lib/content-types").ContentType) => void
+  onSteelman?: (id: string) => void
+  onSocratic?: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
   onToggleSubTask: (id: string, subTaskId: string) => void
@@ -29,6 +31,8 @@ export function KanbanArea({
   onEditAnnotation,
   onReEnrich,
   onChangeType,
+  onSteelman,
+  onSocratic,
   onToggleCollapse,
   onTogglePin,
   onToggleSubTask,
@@ -155,6 +159,8 @@ export function KanbanArea({
                         onEditAnnotation={onEditAnnotation}
                         onReEnrich={onReEnrich}
                         onChangeType={onChangeType}
+                        onSteelman={onSteelman}
+                        onSocratic={onSocratic}
                         onToggleCollapse={onToggleCollapse}
                         onToggleSubTask={onToggleSubTask}
                         onDeleteSubTask={onDeleteSubTask}

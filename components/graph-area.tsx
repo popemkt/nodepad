@@ -28,6 +28,8 @@ interface GraphAreaProps {
   projectName: string
   onReEnrich:       (id: string) => void
   onChangeType:     (id: string, newType: import("@/lib/content-types").ContentType) => void
+  onSteelman?:      (id: string) => void
+  onSocratic?:      (id: string) => void
   onTogglePin:      (id: string) => void
   onEdit:           (id: string, text: string) => void
   onEditAnnotation: (id: string, annotation: string) => void
@@ -178,6 +180,8 @@ export function GraphArea({
   projectName,
   onReEnrich,
   onChangeType,
+  onSteelman,
+  onSocratic,
   onTogglePin,
   onEdit,
   onEditAnnotation,
@@ -771,6 +775,8 @@ export function GraphArea({
             onSelectNode={id => setSelectedId(id)}
             onReEnrich={onReEnrich}
             onChangeType={onChangeType}
+            onSteelman={onSteelman}
+            onSocratic={onSocratic}
             onTogglePin={onTogglePin}
             onEdit={onEdit}
             onEditAnnotation={onEditAnnotation}
