@@ -8,6 +8,8 @@ import { GraphArea } from "@/components/graph-area"
 import { ProjectSidebar } from "@/components/project-sidebar"
 import { StatusBar } from "@/components/status-bar"
 import { GhostPanel, type GhostNote } from "@/components/ghost-panel"
+import { ChatPanel } from "@/components/chat-panel"
+import { sendChat, makeUserMessage, type ChatMessage } from "@/lib/ai-chat"
 import { VimInput } from "@/components/vim-input"
 import { IntroModal } from "@/components/intro-modal"
 import type { TextBlock } from "@/components/tile-card"
@@ -34,7 +36,11 @@ export interface Project {
   lastGhostTimestamp?: number
   /** Texts of recently generated ghost notes — passed back to the API to prevent near-duplicates */
   lastGhostTexts?: string[]
+  /** Per-project chat history, capped at MAX_CHAT_HISTORY messages with FIFO eviction */
+  chatMessages?: ChatMessage[]
 }
+
+const MAX_CHAT_HISTORY = 20
 
 import { TileIndex } from "@/components/tile-index"
 
@@ -46,6 +52,9 @@ export default function Page() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isIndexOpen, setIsIndexOpen] = useState(false)
   const [isGhostPanelOpen, setIsGhostPanelOpen] = useState(false)
+  const [isChatPanelOpen, setIsChatPanelOpen] = useState(false)
+  const [isChatWaiting, setIsChatWaiting] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"tiling" | "kanban" | "graph">("tiling")
   const [isCommandKOpen, setIsCommandKOpen] = useState(false)
   const [jumpToSettings, setJumpToSettings] = useState(false)
@@ -533,6 +542,42 @@ export default function Page() {
     }))
   }, [updateActiveProject])
 
+  // ── Chat panel ───────────────────────────────────────────────────────────
+  const sendChatMessage = useCallback(async (text: string, includeCanvasContext: boolean) => {
+    if (!text.trim()) return false
+    setChatError(null)
+    setIsChatWaiting(true)
+
+    const projectAtSendTime = projectsRef.current.find(p => p.id === activeProjectId)
+    const history = projectAtSendTime?.chatMessages ?? []
+    const canvasNotes = includeCanvasContext ? (projectAtSendTime?.blocks ?? []) : undefined
+
+    try {
+      const userMsg = makeUserMessage(text)
+      const assistantMsg = await sendChat({
+        history,
+        userMessage: text,
+        canvasContext: canvasNotes,
+      })
+      updateActiveProject(p => ({
+        ...p,
+        chatMessages: [...(p.chatMessages ?? []), userMsg, assistantMsg].slice(-MAX_CHAT_HISTORY),
+      }))
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setChatError(message)
+      return false
+    } finally {
+      setIsChatWaiting(false)
+    }
+  }, [activeProjectId, updateActiveProject])
+
+  const clearChat = useCallback(() => {
+    setChatError(null)
+    updateActiveProject(p => ({ ...p, chatMessages: [] }))
+  }, [updateActiveProject])
+
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -550,6 +595,8 @@ export default function Page() {
       if (e.key === "Escape") {
         if (isCommandKOpen) {
           setIsCommandKOpen(false)
+        } else if (isChatPanelOpen) {
+          setIsChatPanelOpen(false)
         } else if (isGhostPanelOpen) {
           setIsGhostPanelOpen(false)
         }
@@ -557,7 +604,7 @@ export default function Page() {
     }
     window.addEventListener("keydown", handleKeys)
     return () => window.removeEventListener("keydown", handleKeys)
-  }, [isCommandKOpen, isGhostPanelOpen, undo])
+  }, [isCommandKOpen, isGhostPanelOpen, isChatPanelOpen, undo])
 
   const addBlock = useCallback(
     (text: string, forcedType?: ContentType) => {
@@ -615,6 +662,10 @@ export default function Page() {
     [activeProjectId, pushHistory, updateActiveProject, enrichBlock]
   )
 
+  const captureFromChat = useCallback((text: string) => {
+    addBlock(text)
+  }, [addBlock])
+
   const deleteBlock = useCallback((id: string) => {
     pushHistory(activeProjectId, blocksRef.current)
     updateActiveProject(p => ({
@@ -663,13 +714,18 @@ export default function Page() {
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
 
+    // Snapshot current state so undo can restore the previous annotation,
+    // category, and contentType. Every caller (tile-card button, type changer,
+    // thesis refresh, chat capture) gets undo for free this way.
+    pushHistory(activeProjectId, blocksRef.current)
+
     updateActiveProject(p => ({
       ...p,
       blocks: p.blocks.map(b => b.id === id ? { ...b, category: newCategory, isEnriching: true } : b)
     }))
 
     enrichBlock(activeProjectId, id, block.text, newCategory || block.category, block.contentType).catch(console.error)
-  }, [activeProjectId, updateActiveProject, enrichBlock])
+  }, [activeProjectId, pushHistory, updateActiveProject, enrichBlock])
 
   const editAnnotation = useCallback((id: string, newAnnotation: string) => {
     updateActiveProject(p => ({
@@ -784,6 +840,10 @@ export default function Page() {
       setIsSidebarOpen(false)
       setIsIndexOpen(false)
       setIsGhostPanelOpen(prev => !prev)
+    } else if (cmd === "open-chat") {
+      setIsSidebarOpen(false)
+      setIsIndexOpen(false)
+      setIsChatPanelOpen(prev => !prev)
     } else if (cmd === "clear") clearBlocks()
     else if (cmd === "help") window.open("https://github.com/albingroen/react-cmdk", "_blank")
     
@@ -862,10 +922,12 @@ export default function Page() {
           isIndexOpen={isIndexOpen}
           isGhostPanelOpen={isGhostPanelOpen}
           ghostNoteCount={ghostNotes.filter(n => !n.isGenerating).length}
+          isChatPanelOpen={isChatPanelOpen}
           activeProjectName={activeProject?.name || ""}
           onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
           onIndexToggle={() => setIsIndexOpen(!isIndexOpen)}
           onGhostPanelToggle={() => setIsGhostPanelOpen(prev => !prev)}
+          onChatPanelToggle={() => setIsChatPanelOpen(prev => !prev)}
           modelLabel={isHydrated && settings.apiKey ? currentModel.shortLabel : undefined}
           showHelpTooltip={showHelpTooltip}
           onHelpTooltipDismiss={() => {
@@ -950,6 +1012,20 @@ export default function Page() {
               <div className="h-full w-full" />
             )}
           </main>
+
+          <ChatPanel
+            isOpen={isChatPanelOpen}
+            onClose={() => setIsChatPanelOpen(false)}
+            messages={activeProject?.chatMessages ?? []}
+            onSend={sendChatMessage}
+            onCapture={captureFromChat}
+            onClear={clearChat}
+            isWaiting={isChatWaiting}
+            hasApiKey={Boolean(settings.apiKey)}
+            hasCanvasNotes={blocks.length > 0}
+            errorMessage={chatError}
+            onDismissError={() => setChatError(null)}
+          />
 
           <GhostPanel
             ghostNotes={ghostNotes}

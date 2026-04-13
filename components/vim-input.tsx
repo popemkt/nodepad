@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   Trello, Grid, Trash2, Clipboard, Download,
   FolderOpen, FolderPlus, BookOpen, Sparkles,
-  FolderDown, FolderInput, GitFork
+  FolderDown, FolderInput, GitFork, MessageSquare
 } from "lucide-react"
 import { Command } from "cmdk"
 import { useModKey } from "@/lib/utils"
@@ -48,10 +48,11 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
   ], [])
 
   const NAV_ITEMS = React.useMemo(() => [
-    { id: "open-projects",  icon: FolderOpen, label: "Projects",    sub: "" },
-    { id: "new-project",    icon: FolderPlus, label: "New Project", sub: "" },
-    { id: "open-index",     icon: BookOpen,   label: "Index",       sub: "" },
-    { id: "open-synthesis", icon: Sparkles,   label: "Synthesis",   sub: "" },
+    { id: "open-projects",  icon: FolderOpen,    label: "Projects",    sub: "" },
+    { id: "new-project",    icon: FolderPlus,    label: "New Project", sub: "" },
+    { id: "open-index",     icon: BookOpen,      label: "Index",       sub: "" },
+    { id: "open-synthesis", icon: Sparkles,      label: "Synthesis",   sub: "" },
+    { id: "open-chat",      icon: MessageSquare, label: "Chat",        sub: "" },
   ], [])
 
   // ── Filtered items ──────────────────────────────────────────────────────
