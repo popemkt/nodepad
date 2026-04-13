@@ -3,6 +3,7 @@
 import { loadAIConfig, getBaseUrl, getProviderHeaders, getModelsForProvider } from "@/lib/ai-settings"
 import { exaSearch, formatExaResultsForPrompt } from "@/lib/web-search"
 import { parseProviderError } from "@/lib/ai-enrich"
+import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { TextBlock } from "@/components/tile-card"
 
 export interface ChatMessage {
@@ -85,7 +86,10 @@ export async function sendChat({ history, userMessage, canvasContext }: SendChat
   }
 
   const canvasBlock = canvasContext ? buildCanvasContext(canvasContext) : ""
-  const systemPrompt = SYSTEM_PROMPT + canvasBlock + exaContext
+  const systemPrompt = applyToneToPrompt(
+    SYSTEM_PROMPT + canvasBlock + exaContext,
+    config.tone,
+  )
 
   // Native grounding rewrites the model id (OpenRouter `:online`, OpenAI search-preview).
   let model = config.modelId

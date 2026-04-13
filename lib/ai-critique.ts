@@ -2,6 +2,7 @@
 
 import { loadAIConfig, getBaseUrl, getProviderHeaders } from "@/lib/ai-settings"
 import { parseProviderError } from "@/lib/ai-enrich"
+import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { ContentType } from "@/lib/content-types"
 
 // Critique tools — features that challenge an existing note rather than
@@ -43,6 +44,8 @@ async function callOneShot(systemPrompt: string, userText: string, jsonMode: boo
   const config = loadAIConfig()
   if (!config) throw new Error("No API key configured. Open Settings to add one.")
 
+  const tunedPrompt = applyToneToPrompt(systemPrompt, config.tone)
+
   const baseUrl = getBaseUrl(config)
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -52,7 +55,7 @@ async function callOneShot(systemPrompt: string, userText: string, jsonMode: boo
       max_tokens: 600,
       temperature: 0.6,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: tunedPrompt },
         { role: "user",   content: userText },
       ],
       ...(jsonMode ? { response_format: { type: "json_object" } } : {}),

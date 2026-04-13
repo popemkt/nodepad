@@ -1,6 +1,11 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import {
+  type TonePreset,
+  DEFAULT_TONE_ID,
+  getActiveTone,
+} from "@/lib/tone-presets"
 
 export interface AIModel {
   id: string
@@ -213,6 +218,11 @@ export interface AISettings {
    *  via Exa search results injected into the system prompt — bypassing the
    *  provider-specific search variants used by OpenAI/OpenRouter. */
   exaApiKey: string
+  /** Currently selected tone preset id. Falls back to "default" when absent. */
+  activeToneId?: string
+  /** User-defined tone presets. Built-in presets live in tone-presets.ts and
+   *  are merged with these at read time. */
+  customTonePresets?: TonePreset[]
 }
 
 /** Which web-grounding strategy applies for this request:
@@ -243,6 +253,8 @@ export interface AIConfig {
   provider: AIProvider
   customBaseUrl: string
   exaApiKey: string
+  /** Resolved active tone — always defined (defaults to the no-op "default" preset) */
+  tone: TonePreset
 }
 
 export function loadAIConfig(): AIConfig | null {
@@ -275,6 +287,8 @@ export function loadAIConfig(): AIConfig | null {
     }
   }
 
+  const tone = getActiveTone(s.activeToneId, s.customTonePresets)
+
   return {
     apiKey: s.apiKey,
     modelId,
@@ -282,6 +296,7 @@ export function loadAIConfig(): AIConfig | null {
     provider: s.provider,
     customBaseUrl: s.customBaseUrl,
     exaApiKey,
+    tone,
   }
 }
 
@@ -323,6 +338,7 @@ export function useAISettings() {
   const [settings, setSettings] = useState<AISettings>({
     apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false,
     provider: DEFAULT_PROVIDER, customBaseUrl: "", exaApiKey: "",
+    activeToneId: DEFAULT_TONE_ID, customTonePresets: [],
   })
   const [isHydrated, setIsHydrated] = useState(false)
 
