@@ -32,6 +32,8 @@ export interface TextBlock {
   contradicts?: string[]
 }
 
+export type HighlightTarget = string | string[] | null
+
 interface TileCardProps {
   block: TextBlock
   isCollapsed: boolean
@@ -45,7 +47,7 @@ interface TileCardProps {
   onToggleSubTask?: (blockId: string, subTaskId: string) => void
   onDeleteSubTask?: (blockId: string, subTaskId: string) => void
   isHighlighted?: boolean
-  onHighlight?: (id: string | null) => void
+  onHighlight?: (target: HighlightTarget) => void
   onConnectionHover?: (blockId: string | null) => void
   onConnectionLock?: (blockId: string) => void
   isConnectionLocked?: boolean
@@ -814,6 +816,7 @@ export const TileCard = memo(function TileCard({
                       const refs = block.contradicts
                         .map(id => allBlocks?.find(b => b.id === id))
                         .filter(Boolean) as TextBlock[]
+                      const refIds = refs.map(r => r.id)
                       const tooltip = refs.length > 0
                         ? "Contradicts:\n" + refs.map(r => "• " + r.text.substring(0, 50)).join("\n")
                         : "Contradicts other notes"
@@ -823,7 +826,7 @@ export const TileCard = memo(function TileCard({
                             e.stopPropagation()
                             if (refs[0]) onHighlight?.(refs[0].id)
                           }}
-                          onMouseEnter={() => refs.forEach(r => onHighlight?.(r.id))}
+                          onMouseEnter={() => refIds.length > 0 && onHighlight?.(refIds)}
                           onMouseLeave={() => onHighlight?.(null)}
                           className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
                           title={tooltip}
@@ -839,6 +842,7 @@ export const TileCard = memo(function TileCard({
                     {/* Contradicted-by badge — computed back-reference: any other block whose contradicts[] includes us */}
                     {(() => {
                       const contradictors = (allBlocks ?? []).filter(b => b.contradicts?.includes(block.id))
+                      const contradictorIds = contradictors.map(r => r.id)
                       if (contradictors.length === 0) return null
                       const tooltip = "Contradicted by:\n" + contradictors.map(r => "• " + r.text.substring(0, 50)).join("\n")
                       return (
@@ -847,7 +851,7 @@ export const TileCard = memo(function TileCard({
                             e.stopPropagation()
                             onHighlight?.(contradictors[0].id)
                           }}
-                          onMouseEnter={() => contradictors.forEach(r => onHighlight?.(r.id))}
+                          onMouseEnter={() => contradictorIds.length > 0 && onHighlight?.(contradictorIds)}
                           onMouseLeave={() => onHighlight?.(null)}
                           className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
                           title={tooltip}

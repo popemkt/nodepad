@@ -13,7 +13,7 @@ import { sendChat, makeUserMessage, type ChatMessage } from "@/lib/ai-chat"
 import { generateSteelman, generateSocraticQuestions } from "@/lib/ai-critique"
 import { VimInput } from "@/components/vim-input"
 import { IntroModal } from "@/components/intro-modal"
-import type { TextBlock } from "@/components/tile-card"
+import type { HighlightTarget, TextBlock } from "@/components/tile-card"
 import type { ContentType } from "@/lib/content-types"
 import { INITIAL_PROJECTS } from "@/lib/initial-data"
 import { useAISettings } from "@/lib/ai-settings"
@@ -48,7 +48,7 @@ import { TileIndex } from "@/components/tile-index"
 export default function Page() {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string>("")
-  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
+  const [highlightedBlockIds, setHighlightedBlockIds] = useState<string[]>([])
   const [isLoaded, setIsLoaded] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isIndexOpen, setIsIndexOpen] = useState(false)
@@ -119,6 +119,16 @@ export default function Page() {
   const activeProject = useMemo(() =>
     projects.find(p => p.id === activeProjectId) || projects[0],
   [projects, activeProjectId])
+  const primaryHighlightedBlockId = highlightedBlockIds[0] ?? null
+
+  const handleHighlight = useCallback((target: HighlightTarget) => {
+    if (target == null) {
+      setHighlightedBlockIds([])
+      return
+    }
+    const ids = Array.isArray(target) ? target : [target]
+    setHighlightedBlockIds(Array.from(new Set(ids)))
+  }, [])
 
   const blocks = activeProject?.blocks || []
   const ghostNotes = activeProject?.ghostNotes || []
@@ -1041,8 +1051,8 @@ export default function Page() {
                   onTogglePin={handleTogglePin}
                   onToggleSubTask={handleToggleSubTask}
                   onDeleteSubTask={handleDeleteSubTask}
-                  highlightedBlockId={highlightedBlockId}
-                  onHighlight={setHighlightedBlockId}
+                  highlightedBlockIds={highlightedBlockIds}
+                  onHighlight={handleHighlight}
                 />
               ) : viewMode === "kanban" ? (
                 <KanbanArea
@@ -1074,8 +1084,8 @@ export default function Page() {
                   onTogglePin={handleTogglePin}
                   onEdit={editBlock}
                   onEditAnnotation={editAnnotation}
-                  highlightedBlockId={highlightedBlockId}
-                  onHighlight={setHighlightedBlockId}
+                  highlightedBlockIds={highlightedBlockIds}
+                  onHighlight={handleHighlight}
                 />
               )
             ) : (
@@ -1133,8 +1143,8 @@ export default function Page() {
 
       <TileIndex 
         blocks={blocks} 
-        onHighlight={setHighlightedBlockId} 
-        highlightedId={highlightedBlockId}
+        onHighlight={handleHighlight} 
+        highlightedId={primaryHighlightedBlockId}
         onClose={() => setIsIndexOpen(false)}
         isOpen={isIndexOpen}
         viewMode={viewMode}
