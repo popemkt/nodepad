@@ -20,7 +20,11 @@ Rules:
 - Don't restate the original note. Get straight to the rebuttal.
 - Use markdown sparingly: **bold** for the key tension, *italic* for titles.
 
-Output: just the counter-argument prose. No JSON, no preamble, no labels.`
+## Output Format — CRITICAL
+Respond with a single JSON object: {"counter": "<the counter-argument prose>"}.
+- No reasoning, no chain-of-thought, no preamble — only the JSON object.
+- The "counter" field contains the final 2–4 sentence rebuttal, nothing else.
+- No markdown code fences around the JSON.`
 
 const SOCRATIC_SYSTEM_PROMPT = `You are a Socratic prompter embedded in a notetaking tool.
 
@@ -66,11 +70,31 @@ async function callOneShot(systemPrompt: string, userText: string, jsonMode: boo
   return content
 }
 
-/** Generate a counter-argument for a note. Returns prose, ready to become a new note. */
+/** Generate a counter-argument for a note. Returns prose, ready to become a new note.
+ *  Uses JSON mode so "thinking" models (Kimi K2.5 Turbo, DeepSeek R1, etc.) don't
+ *  leak chain-of-thought into the response. */
 export async function generateSteelman(text: string, contentType: ContentType): Promise<string> {
   const userText = `<note type="${contentType}">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</note>`
-  const result = await callOneShot(STEELMAN_SYSTEM_PROMPT, userText, false)
-  return result.trim()
+  const raw = await callOneShot(STEELMAN_SYSTEM_PROMPT, userText, true)
+
+  const cleaned = raw.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch {
+    // Fallback: if the model leaked CoT before the JSON, find the last {...} block
+    const lastBrace = cleaned.lastIndexOf("{")
+    if (lastBrace !== -1) {
+      try { parsed = JSON.parse(cleaned.slice(lastBrace)) } catch { /* ignore */ }
+    }
+  }
+
+  const counter = (parsed as { counter?: unknown })?.counter
+  if (typeof counter === "string" && counter.trim()) {
+    return counter.trim()
+  }
+  // Last-resort fallback: return the raw output as-is. Better than failing entirely.
+  throw new Error("Model did not return a valid counter object")
 }
 
 /** Generate 3 Socratic questions about a note. Returns string[] of length 3 (or fewer if model misbehaves). */
