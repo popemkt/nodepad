@@ -11,6 +11,11 @@ interface ChatPanelProps {
   isOpen: boolean
   onClose: () => void
   messages: ChatMessage[]
+  /** In-progress streaming text for the most recent reply. Rendered as a
+   *  tentative assistant bubble at the bottom of the list. Null when no
+   *  stream is active. Empty string while the stream has started but no
+   *  tokens have arrived yet. */
+  streamingText: string | null
   onSend: (text: string, includeCanvasContext: boolean) => Promise<boolean>
   onCapture: (text: string) => void
   onClear: () => void
@@ -47,6 +52,7 @@ export function ChatPanel({
   isOpen,
   onClose,
   messages,
+  streamingText,
   onSend,
   onCapture,
   onClear,
@@ -63,11 +69,12 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to the bottom whenever messages change or while waiting for a reply
+  // Auto-scroll to the bottom whenever messages change, on every streaming
+  // chunk, or while waiting for a reply.
   useEffect(() => {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages, isWaiting])
+  }, [messages, isWaiting, streamingText])
 
   // Auto-grow textarea up to a sensible cap
   useEffect(() => {
@@ -257,18 +264,32 @@ export function ChatPanel({
             ))}
           </AnimatePresence>
 
-          {isWaiting && (
+          {isWaiting && streamingText !== null && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="flex justify-start"
             >
-              <div className="rounded-md px-2.5 py-2 bg-white/5 border border-white/5 flex items-center gap-2">
-                <Loader2 className="h-3 w-3 animate-spin text-primary/60" />
-                <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/50">
-                  Thinking…
-                </span>
-              </div>
+              {streamingText.length === 0 ? (
+                // No tokens yet — show the spinner placeholder
+                <div className="rounded-md px-2.5 py-2 bg-white/5 border border-white/5 flex items-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin text-primary/60" />
+                  <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/50">
+                    Thinking…
+                  </span>
+                </div>
+              ) : (
+                // Tokens are arriving — render them as they stream in. A small
+                // pulsing dot at the end signals that more is coming.
+                <div className="max-w-[88%] rounded-md px-2.5 py-2 text-[12px] leading-relaxed bg-white/5 text-foreground/90 border border-white/5">
+                  <div className="prose-invert">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MarkdownComponents}>
+                      {streamingText}
+                    </ReactMarkdown>
+                  </div>
+                  <span className="inline-block ml-0.5 h-2 w-1.5 align-middle bg-primary/60 animate-pulse" />
+                </div>
+              )}
             </motion.div>
           )}
         </div>
