@@ -425,7 +425,14 @@ export function ProjectSidebar({
                               <button
                                 key={model.id}
                                 onClick={() => {
-                                  setDraft(d => ({ ...d, modelId: model.id, webGrounding: model.supportsGrounding ? d.webGrounding : false }))
+                                  setDraft(d => {
+                                    const exaConfigured = (d.exaApiKey ?? "").trim().length > 0
+                                    return {
+                                      ...d,
+                                      modelId: model.id,
+                                      webGrounding: exaConfigured || model.supportsGrounding ? d.webGrounding : false,
+                                    }
+                                  })
                                   setModelOpen(false)
                                 }}
                                 className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left hover:bg-white/5 transition-colors"
