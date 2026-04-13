@@ -12,7 +12,7 @@ export interface AIModel {
   groundingModelId?: string
 }
 
-export type AIProvider = "openrouter" | "openai" | "zai"
+export type AIProvider = "openrouter" | "openai" | "zai" | "fireworks"
 
 export interface AIProviderPreset {
   id: AIProvider
@@ -43,6 +43,13 @@ export const AI_PROVIDER_PRESETS: AIProviderPreset[] = [
     baseUrl: "https://api.z.ai/api/paas/v4",
     keyUrl: "https://z.ai/manage-apikey/apikey-list",
     keyPlaceholder: "Your Z.ai API key",
+  },
+  {
+    id: "fireworks",
+    label: "Fireworks (Fire Pass)",
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    keyUrl: "https://fireworks.ai/account/api-keys",
+    keyPlaceholder: "fw-...",
   },
 ]
 
@@ -174,9 +181,20 @@ export const ZAI_MODELS: AIModel[] = [
   },
 ]
 
+export const FIREWORKS_MODELS: AIModel[] = [
+  {
+    id: "accounts/fireworks/routers/kimi-k2p5-turbo",
+    label: "Kimi K2.5 Turbo",
+    shortLabel: "Kimi K2.5",
+    description: "Fire Pass · 262K context · tools + vision",
+    supportsGrounding: false,
+  },
+]
+
 export function getModelsForProvider(provider: AIProvider): AIModel[] {
-  if (provider === "openai") return OPENAI_MODELS
-  if (provider === "zai")    return ZAI_MODELS
+  if (provider === "openai")    return OPENAI_MODELS
+  if (provider === "zai")       return ZAI_MODELS
+  if (provider === "fireworks") return FIREWORKS_MODELS
   return AI_MODELS // openrouter + safe fallback for any stale localStorage value
 }
 
@@ -191,29 +209,40 @@ export interface AISettings {
   customBaseUrl: string
   /** Per-provider key store so switching back to a provider restores its key */
   providerKeys?: Partial<Record<AIProvider, string>>
+  /** Optional Exa API key. When set, web grounding works for ANY provider/model
+   *  via Exa search results injected into the system prompt — bypassing the
+   *  provider-specific search variants used by OpenAI/OpenRouter. */
+  exaApiKey: string
 }
+
+/** Which web-grounding strategy applies for this request:
+ *  - off:    no grounding
+ *  - native: provider has a hosted search variant (OpenAI search-preview, OpenRouter `:online`)
+ *  - exa:    user has an Exa key — works for every provider */
+export type GroundingMode = "off" | "native" | "exa"
 
 const STORAGE_KEY = "nodepad-ai-settings"
 
 function loadSettings(): AISettings {
   if (typeof window === "undefined") {
-    return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "" }
+    return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "", exaApiKey: "" }
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "" }
+    if (!raw) return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "", exaApiKey: "" }
     return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "", ...JSON.parse(raw) }
   } catch {
-    return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "" }
+    return { apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false, provider: DEFAULT_PROVIDER, customBaseUrl: "", exaApiKey: "" }
   }
 }
 
 export interface AIConfig {
   apiKey: string
   modelId: string
-  supportsGrounding: boolean
+  groundingMode: GroundingMode
   provider: AIProvider
   customBaseUrl: string
+  exaApiKey: string
 }
 
 export function loadAIConfig(): AIConfig | null {
@@ -226,12 +255,34 @@ export function loadAIConfig(): AIConfig | null {
   // OpenRouter-prefixed id (e.g. "openai/gpt-4o") after switching to OpenAI —
   // that string won't match any entry in OPENAI_MODELS so we fall back to "gpt-4o".
   const modelId = model?.id ?? models[0]?.id ?? s.modelId ?? DEFAULT_MODEL_ID
-  // Z.ai does not support grounding; only openrouter and openai do
-  const supportsGrounding =
-    (s.provider === "openrouter" || s.provider === "openai") &&
-    s.webGrounding &&
-    (model?.supportsGrounding ?? false)
-  return { apiKey: s.apiKey, modelId, supportsGrounding, provider: s.provider, customBaseUrl: s.customBaseUrl }
+  const exaApiKey = (s.exaApiKey ?? "").trim()
+
+  // Grounding mode resolution:
+  //  1. If toggle is off → "off".
+  //  2. If user has an Exa key → "exa" (works for every provider/model).
+  //  3. Otherwise fall back to the provider's native search variant when available
+  //     (OpenAI search-preview models, OpenRouter `:online`).
+  //  4. Else "off" — toggle is on but nothing can fulfil it (UI surfaces this).
+  let groundingMode: GroundingMode = "off"
+  if (s.webGrounding) {
+    if (exaApiKey) {
+      groundingMode = "exa"
+    } else if (
+      (s.provider === "openrouter" || s.provider === "openai") &&
+      (model?.supportsGrounding ?? false)
+    ) {
+      groundingMode = "native"
+    }
+  }
+
+  return {
+    apiKey: s.apiKey,
+    modelId,
+    groundingMode,
+    provider: s.provider,
+    customBaseUrl: s.customBaseUrl,
+    exaApiKey,
+  }
 }
 
 export function getBaseUrl(config: AIConfig): string {
@@ -271,7 +322,7 @@ export function useAISettings() {
   // modelLabel prop, etc.) between the server render and client hydration.
   const [settings, setSettings] = useState<AISettings>({
     apiKey: "", modelId: DEFAULT_MODEL_ID, webGrounding: false,
-    provider: DEFAULT_PROVIDER, customBaseUrl: "",
+    provider: DEFAULT_PROVIDER, customBaseUrl: "", exaApiKey: "",
   })
   const [isHydrated, setIsHydrated] = useState(false)
 
@@ -293,7 +344,15 @@ export function useAISettings() {
   const resolvedModelId = (() => {
     const model = models.find(m => m.id === settings.modelId) || models[0]
     if (!model) return settings.modelId
-    if (settings.provider === "openrouter" && settings.webGrounding && model.supportsGrounding) {
+    // Only append `:online` for OpenRouter's native grounding path. When an Exa
+    // key is present we ground through Exa instead and the base model id stays.
+    const exaConfigured = (settings.exaApiKey ?? "").trim().length > 0
+    if (
+      settings.provider === "openrouter" &&
+      settings.webGrounding &&
+      model.supportsGrounding &&
+      !exaConfigured
+    ) {
       return `${model.id}:online`
     }
     return model.id
