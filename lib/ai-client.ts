@@ -14,13 +14,16 @@
 
 import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import type { JSONObject } from "@ai-sdk/provider"
-import type { LanguageModel } from "ai"
+import type { JSONValue, LanguageModel } from "ai"
 import {
   getBaseUrl,
   getModelsForProvider,
   type AIConfig,
 } from "@/lib/ai-settings"
+
+export interface PrepareAICallOptions {
+  enableNativeGrounding?: boolean
+}
 
 /** Build a model instance for the given config. Routes to the right provider
  *  package based on whether we're hitting the actual OpenAI API or an
@@ -54,11 +57,14 @@ function getModelInstance(config: AIConfig, modelId: string): LanguageModel {
  *  - OpenAI: swap to the `*-search-preview` variant for hosted Bing
  *  Returns the rewritten id and any provider-specific options that need
  *  to be forwarded to the SDK call. */
-function resolveModelId(config: AIConfig): {
+export function resolveModelIdForCall(
+  config: AIConfig,
+  options?: PrepareAICallOptions,
+): {
   modelId: string
-  webSearchOptions?: JSONObject
+  webSearchOptions?: Record<string, JSONValue | undefined>
 } {
-  if (config.groundingMode !== "native") {
+  if (options?.enableNativeGrounding === false || config.groundingMode !== "native") {
     return { modelId: config.modelId }
   }
   if (config.provider === "openrouter") {
@@ -80,14 +86,17 @@ export interface PreparedAICall {
   /** Ready-to-call LanguageModel instance. Pass to generateText/generateObject/streamText. */
   model: LanguageModel
   /** Provider-specific options to forward via the SDK's `providerOptions` parameter. */
-  providerOptions?: Record<string, JSONObject>
+  providerOptions?: Record<string, Record<string, JSONValue | undefined>>
 }
 
 /** Build a ready-to-call AI SDK model instance from an AIConfig.
  *  Handles provider client construction, native-grounding model rewrites,
  *  and provider-specific options in one place. */
-export function prepareAICall(config: AIConfig): PreparedAICall {
-  const { modelId, webSearchOptions } = resolveModelId(config)
+export function prepareAICall(
+  config: AIConfig,
+  options?: PrepareAICallOptions,
+): PreparedAICall {
+  const { modelId, webSearchOptions } = resolveModelIdForCall(config, options)
   return {
     model: getModelInstance(config, modelId),
     providerOptions: webSearchOptions

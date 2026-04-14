@@ -57,25 +57,28 @@ const SocraticSchema = z.object({
   questions: z.array(z.string()).length(3).describe("Exactly 3 sharp questions, max 15 words each"),
 })
 
-interface CritiqueCallOptions<T extends z.ZodTypeAny> {
+interface CritiqueCallOptions<T extends z.AnyZodObject> {
   systemPrompt: string
   userText: string
   schema: T
   schemaName: string
 }
 
-async function critiqueCall<T extends z.ZodTypeAny>(
+async function critiqueCall<T extends z.AnyZodObject>(
   opts: CritiqueCallOptions<T>,
 ): Promise<z.infer<T>> {
   const config = loadAIConfig()
   if (!config) throw new Error("No API key configured. Open Settings to add one.")
 
   const tunedPrompt = applyToneToPrompt(opts.systemPrompt, config.tone)
-  const { model, providerOptions } = prepareAICall(config)
+  const { model, providerOptions } = prepareAICall(config, {
+    enableNativeGrounding: false,
+  })
 
   try {
     const { object } = await generateObject({
       model,
+      output: "object",
       schema: opts.schema,
       schemaName: opts.schemaName,
       system: tunedPrompt,

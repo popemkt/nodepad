@@ -3,6 +3,7 @@
 import { streamText, type ModelMessage } from "ai"
 import { loadAIConfig } from "@/lib/ai-settings"
 import { prepareAICall } from "@/lib/ai-client"
+import { extractSourceLinksFromResponseBody, normalizeSourceLinks } from "@/lib/ai-source-links"
 import { exaSearch, formatExaResultsForPrompt } from "@/lib/web-search"
 import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { TextBlock } from "@/components/tile-card"
@@ -12,7 +13,7 @@ export interface ChatMessage {
   role: "user" | "assistant"
   content: string
   timestamp: number
-  /** Source tiles populated when this message was grounded via Exa */
+  /** Source tiles populated when this message was grounded */
   sources?: { url: string; title: string; siteName: string }[]
 }
 
@@ -103,8 +104,8 @@ export function sendChat({ history, userMessage, canvasContext }: SendChatOption
   // before kicking off the model call. The textStream iterates over the inner
   // generator's `.textStream`, and `done` resolves once that iteration completes.
 
-  let resolveDone: (msg: ChatMessage) => void
-  let rejectDone: (err: unknown) => void
+  let resolveDone!: (msg: ChatMessage) => void
+  let rejectDone!: (err: unknown) => void
   const done = new Promise<ChatMessage>((res, rej) => {
     resolveDone = res
     rejectDone = rej
@@ -139,12 +140,21 @@ export function sendChat({ history, userMessage, canvasContext }: SendChatOption
         yield chunk
       }
 
+      const [sdkSources, steps] = await Promise.all([
+        result.sources,
+        result.steps,
+      ])
+      const lastStep = steps.at(-1)
+      const nativeSources =
+        normalizeSourceLinks(sdkSources) ??
+        extractSourceLinksFromResponseBody(lastStep?.response.body)
+
       resolveDone({
         id: generateMessageId(),
         role: "assistant",
         content: accumulated,
         timestamp: Date.now(),
-        sources: exa.sources,
+        sources: nativeSources ?? exa.sources,
       })
     } catch (err) {
       rejectDone(err)

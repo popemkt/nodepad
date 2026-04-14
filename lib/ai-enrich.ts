@@ -5,6 +5,7 @@ import { z } from "zod"
 import { detectContentType } from "@/lib/detect-content-type"
 import { loadAIConfig } from "@/lib/ai-settings"
 import { prepareAICall } from "@/lib/ai-client"
+import { extractSourceLinksFromResponseBody } from "@/lib/ai-source-links"
 import { exaSearch, formatExaResultsForPrompt, type WebSearchResult } from "@/lib/web-search"
 import { applyToneToPrompt } from "@/lib/tone-presets"
 import type { ContentType } from "@/lib/content-types"
@@ -255,10 +256,16 @@ You have live web access. For this note type, include 1–2 real source citation
 
   const { model, providerOptions } = prepareAICall(config)
 
-  let raw: z.infer<typeof ENRICH_SCHEMA>
+  let generated: {
+    object: z.infer<typeof ENRICH_SCHEMA>
+    response: {
+      body?: unknown
+    }
+  }
   try {
-    const generated = await generateObject({
+    generated = await generateObject({
       model,
+      output: "object",
       schema: ENRICH_SCHEMA,
       schemaName: "enrichment_result",
       system: systemPrompt,
@@ -267,7 +274,6 @@ You have live web access. For this note type, include 1–2 real source citation
       maxOutputTokens: MAX_ENRICH_OUTPUT_TOKENS,
       ...(providerOptions ? { providerOptions } : {}),
     })
-    raw = generated.object
   } catch (err) {
     if (NoObjectGeneratedError.isInstance(err)) {
       const finishReason = err.finishReason ? ` Finish reason: ${err.finishReason}.` : ""
@@ -279,14 +285,14 @@ You have live web access. For this note type, include 1–2 real source citation
   // Coerce schema output into the EnrichResult shape with the same
   // claim-only confidence rule the legacy parser used.
   const result: EnrichResult = {
-    contentType: raw.contentType,
-    category: raw.category,
-    annotation: raw.annotation,
-    confidence: raw.confidence,
-    influencedByIndices: raw.influencedByIndices,
-    contradictsIndices: raw.contradictsIndices,
-    isUnrelated: raw.isUnrelated,
-    mergeWithIndex: raw.mergeWithIndex,
+    contentType: generated.object.contentType,
+    category: generated.object.category,
+    annotation: generated.object.annotation,
+    confidence: generated.object.confidence,
+    influencedByIndices: generated.object.influencedByIndices,
+    contradictsIndices: generated.object.contradictsIndices,
+    isUnrelated: generated.object.isUnrelated,
+    mergeWithIndex: generated.object.mergeWithIndex,
   }
   // Confidence is claim-specific. Defensively null it out for any other type
   // in case the model ignored the system prompt and returned a number anyway.
@@ -296,11 +302,10 @@ You have live web access. For this note type, include 1–2 real source citation
     result.confidence = Math.min(100, Math.max(0, Math.round(result.confidence)))
   }
 
-  // Source extraction: the AI SDK abstracts away `message.annotations`, so the
-  // native-grounding citation extraction we used to do is gone. Users who want
-  // clickable sources should configure Exa grounding instead — Exa results are
-  // attached here directly from the search response we already made above.
-  if (exaResults.length > 0) {
+  const nativeSources = extractSourceLinksFromResponseBody(generated.response.body)
+  if (nativeSources) {
+    result.sources = nativeSources
+  } else if (exaResults.length > 0) {
     result.sources = exaResults.map(r => {
       let siteName = ""
       try { siteName = new URL(r.url).hostname.replace(/^www\./, "") } catch { /* ignore */ }

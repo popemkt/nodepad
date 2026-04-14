@@ -19,6 +19,12 @@ import { INITIAL_PROJECTS } from "@/lib/initial-data"
 import { useAISettings } from "@/lib/ai-settings"
 import { enrichBlockClient } from "@/lib/ai-enrich"
 import { generateGhostClient } from "@/lib/ai-ghost"
+import {
+  appendChatStreaming,
+  getProjectStreamingText,
+  startChatStreaming,
+  type ChatStreamingState,
+} from "@/lib/chat-streaming-state"
 import { exportToMarkdown, downloadMarkdown, copyToClipboard } from "@/lib/export"
 import { downloadNodepadFile, parseNodepadFile, NodepadParseError } from "@/lib/nodepad-format"
 import { detectContentType } from "@/lib/detect-content-type"
@@ -56,10 +62,8 @@ export default function Page() {
   const [isChatPanelOpen, setIsChatPanelOpen] = useState(false)
   const [isChatWaiting, setIsChatWaiting] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
-  /** In-progress streaming assistant text for the chat panel. Lives in page
-   *  state but isn't persisted — once the stream completes the final message
-   *  is committed to the project's chatMessages and this is cleared. */
-  const [chatStreamingText, setChatStreamingText] = useState<string | null>(null)
+  /** In-progress chat stream, scoped to the project that triggered it. */
+  const [chatStreamingState, setChatStreamingState] = useState<ChatStreamingState | null>(null)
   const [viewMode, setViewMode] = useState<"tiling" | "kanban" | "graph">("tiling")
   const [isCommandKOpen, setIsCommandKOpen] = useState(false)
   const [jumpToSettings, setJumpToSettings] = useState(false)
@@ -573,7 +577,7 @@ export default function Page() {
     if (!text.trim()) return false
     setChatError(null)
     setIsChatWaiting(true)
-    setChatStreamingText("")
+    setChatStreamingState(startChatStreaming(activeProjectId))
 
     const projectAtSendTime = projectsRef.current.find(p => p.id === activeProjectId)
     const history = projectAtSendTime?.chatMessages ?? []
@@ -587,10 +591,12 @@ export default function Page() {
         canvasContext: canvasNotes,
       })
 
-      let accumulated = ""
       for await (const chunk of handle.textStream) {
-        accumulated += chunk
-        setChatStreamingText(accumulated)
+        setChatStreamingState(prev =>
+          prev && prev.projectId === activeProjectId
+            ? appendChatStreaming(prev, chunk)
+            : prev
+        )
       }
 
       const assistantMsg = await handle.done
@@ -605,7 +611,9 @@ export default function Page() {
       return false
     } finally {
       setIsChatWaiting(false)
-      setChatStreamingText(null)
+      setChatStreamingState(prev =>
+        prev?.projectId === activeProjectId ? null : prev
+      )
     }
   }, [activeProjectId, updateActiveProject])
 
@@ -1134,7 +1142,7 @@ export default function Page() {
             isOpen={isChatPanelOpen}
             onClose={() => setIsChatPanelOpen(false)}
             messages={activeProject?.chatMessages ?? []}
-            streamingText={chatStreamingText}
+            streamingText={getProjectStreamingText(chatStreamingState, activeProjectId)}
             onSend={sendChatMessage}
             onCapture={captureFromChat}
             onClear={clearChat}

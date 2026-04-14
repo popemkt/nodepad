@@ -61,11 +61,14 @@ ${context.map(c =>
   // Cap output to keep cost low and avoid 402 on limited-credit accounts.
   const MAX_GHOST_OUTPUT_TOKENS = 220
 
-  const { model, providerOptions } = prepareAICall(config)
+  const { model, providerOptions } = prepareAICall(config, {
+    enableNativeGrounding: false,
+  })
 
   try {
     const { object } = await generateObject({
       model,
+      output: "object",
       schema: GhostSchema,
       schemaName: "ghost_synthesis",
       prompt: tunedPrompt,
