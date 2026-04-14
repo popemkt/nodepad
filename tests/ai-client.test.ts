@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { resolveModelIdForCall } from "@/lib/ai-client"
+import {
+  providerSupportsStructuredOutputs,
+  resolveModelIdForCall,
+} from "@/lib/ai-client"
 import type { AIConfig } from "@/lib/ai-settings"
 
 const baseConfig: AIConfig = {
@@ -33,5 +36,16 @@ describe("resolveModelIdForCall", () => {
     ).toEqual({
       modelId: "gpt-4o",
     })
+  })
+})
+
+describe("providerSupportsStructuredOutputs", () => {
+  it("treats fireworks as structured-output capable", () => {
+    expect(providerSupportsStructuredOutputs({
+      ...baseConfig,
+      provider: "fireworks",
+      modelId: "accounts/fireworks/routers/kimi-k2p5-turbo",
+      groundingMode: "off",
+    })).toBe(true)
   })
 })

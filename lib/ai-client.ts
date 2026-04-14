@@ -25,6 +25,13 @@ export interface PrepareAICallOptions {
   enableNativeGrounding?: boolean
 }
 
+export function providerSupportsStructuredOutputs(config: AIConfig): boolean {
+  if (config.provider === "openai") return true
+  // Fireworks documents json_schema support on its OpenAI-compatible endpoint.
+  if (config.provider === "fireworks") return true
+  return false
+}
+
 /** Build a model instance for the given config. Routes to the right provider
  *  package based on whether we're hitting the actual OpenAI API or an
  *  OpenAI-compatible third-party endpoint. */
@@ -41,6 +48,7 @@ function getModelInstance(config: AIConfig, modelId: string): LanguageModel {
     name: config.provider,
     apiKey: config.apiKey,
     baseURL: getBaseUrl(config),
+    supportsStructuredOutputs: providerSupportsStructuredOutputs(config),
     // OpenRouter requires these headers for ranking on their leaderboard.
     headers: config.provider === "openrouter"
       ? {

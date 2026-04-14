@@ -116,6 +116,21 @@ const ENRICH_SCHEMA = z.object({
     .describe("Index of an existing note to merge into, or null if this note stands alone"),
 })
 
+const JSON_OUTPUT_HINT = `
+
+## Output Format — CRITICAL
+Return exactly one JSON object and nothing else.
+Do not wrap it in markdown fences.
+Required keys:
+- "contentType": one of entity, claim, question, task, idea, reference, quote, definition, opinion, reflection, narrative, comparison, general, thesis
+- "category": string
+- "annotation": string
+- "confidence": number or null
+- "influencedByIndices": number[]
+- "contradictsIndices": number[]
+- "isUnrelated": boolean
+- "mergeWithIndex": number or null`
+
 // ── URL metadata (via server route to bypass CORS) ────────────────────────────
 
 type UrlMeta = { title: string; description: string; excerpt: string; statusCode: number }
@@ -203,7 +218,7 @@ You have live web access. For this note type, include 1–2 real source citation
     : ""
 
   const systemPrompt = applyToneToPrompt(
-    SYSTEM_PROMPT + groundingNote + exaContext,
+    SYSTEM_PROMPT + groundingNote + exaContext + JSON_OUTPUT_HINT,
     config.tone,
   )
 

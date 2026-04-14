@@ -22,7 +22,8 @@ Rules:
 - No URLs, no hyperlinks. Reference sources by name only if at all.
 - Don't hedge ("on the other hand…", "it could be argued…"). State the counter as if you believe it.
 - Don't restate the original note. Get straight to the rebuttal.
-- Use markdown sparingly: **bold** for the key tension, *italic* for titles.`
+- Use markdown sparingly: **bold** for the key tension, *italic* for titles.
+- Return exactly one JSON object with key "counter". No prose before or after it.`
 
 const SHORTEN_SYSTEM_PROMPT = `You are an editor embedded in a notetaking tool. Your job: rewrite the user's note as a sharp, title-style fragment.
 
@@ -32,7 +33,8 @@ Rules:
 - Preserve the core noun phrase or claim — strip qualifiers, hedges, and connectives.
 - Keep proper nouns and numbers exactly as written.
 - Do not editorialise, summarise, or add information that wasn't there.
-- Match the language of the original note.`
+- Match the language of the original note.
+- Return exactly one JSON object with key "title". No prose before or after it.`
 
 const SOCRATIC_SYSTEM_PROMPT = `You are a Socratic prompter embedded in a notetaking tool.
 
@@ -43,7 +45,8 @@ Rules:
 - Each question max 15 words. Concrete, not vague ("What evidence?", not "How do we know?").
 - Avoid yes/no questions when possible — favour ones that force exploration.
 - No questions that just restate the note.
-- No questions about the user themselves ("Why do you think X?") — focus on the subject matter.`
+- No questions about the user themselves ("Why do you think X?") — focus on the subject matter.
+- Return exactly one JSON object with key "questions" whose value is an array of 3 strings.`
 
 const SteelmanSchema = z.object({
   counter: z.string().describe("The 2–4 sentence counter-argument prose"),
